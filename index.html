@@ -3,9 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<!-- iOS: if the user adds this page to their Home Screen, these flags make
-     it launch with NO Safari chrome (no address bar, no status bar overlay
-     issues) — the closest thing to a true full-screen experience on iPhone. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
@@ -13,7 +10,6 @@
 <title>SprizzleIDE</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <script type="module">
-  // WebLLM — loaded as an ES module and exposed on window for use by the IDE script
   import * as webllm from "https://esm.run/@mlc-ai/web-llm";
   window.webllm = webllm;
   window.dispatchEvent(new Event('webllm-ready'));
@@ -30,6 +26,7 @@
   html,body{height:100%;overflow:hidden;background:var(--bg-0);color:var(--text-0);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px;}
   #app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
   #header{height:40px;background:var(--bg-1);border-bottom:1px solid var(--border);display:flex;align-items:center;flex-shrink:0;z-index:10;}
+  #header-scroll{display:flex;align-items:center;width:100%;height:100%;}
   #main{display:flex;flex:1;overflow:hidden;}
   #sidebar{width:220px;background:var(--bg-1);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
   #center{flex:1;display:flex;flex-direction:column;overflow:hidden;}
@@ -46,8 +43,8 @@
   .menu-bar{display:flex;height:100%;}
   .menu-item{padding:0 12px;height:100%;display:flex;align-items:center;cursor:pointer;color:var(--text-1);position:relative;font-size:12px;}
   .menu-item:hover{background:var(--bg-3);color:var(--text-0);}
-  .menu-dropdown{display:none;position:absolute;top:100%;left:0;background:var(--bg-2);border:1px solid var(--border);min-width:195px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.5);}
-  .menu-item:hover .menu-dropdown{display:block;}
+  .menu-dropdown{display:none;position:absolute;top:100%;left:0;background:var(--bg-2);border:1px solid var(--border);min-width:195px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+  .menu-item.menu-open .menu-dropdown{display:block;}
   .menu-dd-item{padding:7px 16px;cursor:pointer;color:var(--text-1);display:flex;justify-content:space-between;align-items:center;font-size:12px;}
   .menu-dd-item:hover{background:var(--bg-3);color:var(--text-0);}
   .menu-dd-sep{height:1px;background:var(--border);margin:4px 0;}
@@ -230,11 +227,6 @@
      MOBILE PORTRAIT LAYOUT (phones only — desktop layout untouched)
      ══════════════════════════════════════════════════════════════════ */
   @media (max-width: 768px) and (orientation: portrait) {
-    /* Hard-clamp everything to the visible viewport so nothing can render
-       or be clipped off-screen. Also ensure the page background extends
-       fully into the iOS safe areas (notch/camera island, home indicator,
-       rounded corners) instead of leaving a white bar — `html` background
-       is what shows through those areas with viewport-fit=cover. */
     html{background:var(--bg-0);}
     html,body{width:100%;max-width:100vw;overflow:hidden;height:100%;height:100dvh;}
     #app{
@@ -244,13 +236,6 @@
       background:var(--bg-0);
       position:relative;
     }
-
-    /* The activity bar (Explorer/Search/Source/GitHub/AI/Settings) is LOCKED
-       to the very top of the screen, and the toolbar (File/Edit/View/Run/AI/
-       GitHub menus) is LOCKED to the very bottom — both as position:fixed so
-       neither ever scrolls out of view while the user scrolls the panel
-       stack in #main. #main gets matching top/bottom padding so its content
-       starts/ends right at the edges of these fixed bars. */
     #activity-bar{
       position:fixed;top:0;left:0;right:0;
       z-index:30;
@@ -262,60 +247,48 @@
       width:100%;max-width:100vw;
       height:48px;
       box-sizing:content-box;
+      /* overflow must stay visible so the header chrome doesn't clip anything,
+         but the actual overflow-escaping is handled by the JS portal approach. */
+      overflow:visible;
+    }
+    #header-scroll{
       flex-wrap:nowrap;
-      overflow-x:auto;overflow-y:hidden;
+      overflow-x:auto;overflow-y:visible;
       -webkit-overflow-scrolling:touch;
     }
-    /* #main fills the space between the fixed activity bar (top) and the
-       fixed header (bottom). Heights: activity bar 42px + safe-area-top,
-       header 48px + safe-area-bottom. */
+    #header-scroll::-webkit-scrollbar{height:0;}
+    #header-scroll > *{flex-shrink:0;}
     #main{
       order:1;flex:1;min-height:0;width:100%;max-width:100vw;
       margin-top:calc(42px + env(safe-area-inset-top));
       margin-bottom:calc(48px + 22px + env(safe-area-inset-bottom));
       height:auto;
     }
-    /* Status bar sits just above the fixed header, also fixed so it doesn't
-       scroll away. */
     #status-bar{
       position:fixed;left:0;right:0;
       bottom:calc(48px + env(safe-area-inset-bottom));
       z-index:29;width:100%;max-width:100vw;
     }
-    #header::-webkit-scrollbar{height:0;}
-    #header > *{flex-shrink:0;}
-    .header-spacer{display:none;} /* no spacer needed in a scrolling row */
+    .header-spacer{display:none;}
     .logo{font-size:13px;padding:0 10px;}
     .menu-item{padding:0 8px;font-size:11px;}
     .header-btn{padding:0 10px;font-size:11px;}
     .run-btn,.preview-btn{padding:0 10px;font-size:11px;}
 
-    /* Header dropdowns must open UPWARD since the header is locked to the
-       bottom of the screen (opening downward would push them off-screen),
-       and capped so they can't extend past the viewport edge. On touch
-       devices :hover is unreliable, so dropdowns are opened/closed via JS
-       (toggleMobileMenu) which adds/removes the .menu-open class. */
-    .menu-dropdown{
-      top:auto;
-      bottom:100%;
-      left:auto;right:0;max-width:90vw;max-height:60vh;overflow-y:auto;
+    /* ── MOBILE DROPDOWN DISPLAY ────────────────────────────────────
+       Dropdowns on mobile are positioned and displayed entirely by
+       openMobileDropdown() via inline cssText (portal to body).
+       The rule below is kept only as a fallback for non-portaled
+       scenarios; z-index is deliberately lower than the JS value. */
+    .menu-item.menu-open .menu-dropdown{
+      max-width:90vw;
+      max-height:60vh;
+      overflow-y:auto;
+      z-index:99999;
     }
-    .menu-item:hover .menu-dropdown{display:none;} /* disable hover-trigger on touch */
-    .menu-item.menu-open .menu-dropdown{display:block;}
 
-    /* Stack everything vertically instead of side-by-side */
     #main.split-container{flex-direction:column;overflow-y:auto;overflow-x:hidden;align-items:stretch;}
-
-    /* #center normally wraps editor-area + bottom-panel as a flex column.
-       On mobile we flatten it so all 4 panels become direct flex siblings
-       of #main, which lets us freely reorder/shuffle them. */
     #center{display:contents;}
-
-    /* Activity bar becomes a slim horizontal strip, with explorer/search/
-       source-control on the left, a gap in the middle to clear the iPhone
-       camera island/notch, and github/AI/settings on the right. It is
-       LOCKED to the top of the screen via position:fixed (set above) so it
-       never scrolls out of view as the user scrolls through the stack. */
     #activity-bar{
       width:100%;height:42px;flex-direction:row;border-right:none;border-bottom:1px solid var(--border);
       padding:env(safe-area-inset-top) 8px 0 8px;justify-content:space-between;align-items:center;
@@ -326,16 +299,9 @@
     }
     #activity-bar .activity-group{flex-direction:row;gap:6px;flex-shrink:0;}
     #activity-bar .activity-spacer{flex:1 1 auto;display:block;}
-    #activity-bar .activity-notch-gap{
-      flex:0 0 32px;
-      width:32px;
-    }
+    #activity-bar .activity-notch-gap{flex:0 0 32px;width:32px;}
     #activity-bar .tooltip{display:none!important;}
-
-    /* Hide all drag-resize handles — not usable on touch */
     .resize-h,.resize-v{display:none!important;}
-
-    /* Each major panel becomes a stacked rectangular "card" by default */
     #sidebar,#editor-area,#bottom-panel,#ai-panel{
       width:100%!important;
       height:150px!important;
@@ -347,19 +313,12 @@
       transition:flex-basis .28s ease, height .28s ease, order .01s;
       overflow:hidden;
     }
-    /* Editor's internal wrapper must fill whatever height the card has */
     #editor-area{display:flex;flex-direction:column;}
     #editor-area #editor-wrapper{flex:1;min-height:0;}
-
-    /* Default stack order (top to bottom): editor, sidebar, terminal, AI.
-       JS overrides these with inline `order` styles when shuffling. */
     #editor-area{order:1;}
     #sidebar{order:2;}
     #bottom-panel{order:3;}
     #ai-panel{order:4;}
-
-    /* ACTIVE panel: square aspect ratio, sized to fill the width, moved to
-       the center of the stack (order assigned dynamically by JS). */
     #main.split-container .mobile-panel-active{
       flex:0 0 auto!important;
       height:auto!important;
@@ -369,23 +328,21 @@
       box-shadow:0 4px 20px rgba(0,0,0,.4);
       border-color:var(--accent);
     }
-
-    /* Make sure panel content can scroll within fixed/active heights */
     #file-tree,#search-panel-sidebar,#git-panel-sidebar,#github-panel-content,
     #terminal,#ai-messages{overflow-y:auto;}
-
-    /* Status bar: allow horizontal scroll instead of squishing */
     #status-bar{overflow-x:auto;white-space:nowrap;}
-
-    /* iOS Safari auto-zooms the page when focusing an input/textarea/select
-       with a computed font-size below 16px. Force 16px on all such fields
-       (visually compensated with padding) so focusing never triggers a zoom,
-       independent of the viewport meta tag. */
     input,textarea,select,#editor,#term-input,#ai-input{font-size:16px!important;}
     .form-input,.form-select{font-size:16px!important;}
-
-    /* Tabs row: keep compact */
     #tabs{height:34px;}
+  }
+
+  /* ── Mobile landscape: keep the app filling the true dynamic viewport.
+     `dvh` shrinks when Safari's URL bar is visible and expands when it
+     hides, so content never gets permanently cropped behind the bar.
+     The JS below also nudges Safari into collapsing the bar automatically. ── */
+  @media (max-width: 932px) and (orientation: landscape) {
+    html, body { height: 100dvh !important; }
+    #app        { height: 100dvh !important; }
   }
 </style>
 </head>
@@ -393,6 +350,7 @@
 <div id="app">
   <!-- HEADER -->
   <div id="header">
+    <div id="header-scroll">
     <div class="logo"><i class="fa-solid fa-code"></i> SprizzleIDE</div>
     
     <div class="menu-bar">
@@ -476,6 +434,7 @@
     <button class="header-btn run-btn" onclick="runCode()"><i class="fa-solid fa-play"></i> Run</button>
     <button class="header-btn" onclick="openModelConfig()"><i class="fa-solid fa-robot"></i> <span id="header-model-name" style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No Model</span></button>
     <button class="header-btn" onclick="togglePanel('ai')"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+    </div>
   </div>
 
   <!-- MAIN -->
@@ -584,11 +543,9 @@
           <div id="welcome" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px;color:var(--text-2);">
             <div style="font-size:48px;color:var(--accent);opacity:.3;"><i class="fa-solid fa-code"></i></div>
             <div style="font-size:22px;color:var(--text-1);font-weight:300;letter-spacing:2px;">SprizzleIDE</div>
-            
             <div style="font-size:10px;text-align:center;line-height:2;">
               <span style="color:var(--text-3);">"Make your own damn website if it looks so easy."</span>
             </div>
-            
             <div style="font-size:12px;text-align:center;line-height:2;">
               <span style="color:var(--text-2);">Ctrl+N</span> New File &nbsp;·&nbsp;
               <span style="color:var(--text-2);">Ctrl+O</span> Open &nbsp;·&nbsp;
@@ -700,7 +657,7 @@
             <option value="Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC">Qwen2.5-Coder 3B (~3GB)</option>
             <option value="Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC">Qwen2.5-Coder 7B (~7GB, needs a strong GPU)</option>
           </select>
-          <div class="form-hint">Runs fully in-browser via WebGPU. First use downloads &amp; caches the model (a few hundred MB to several GB depending on size). Requires Chrome/Edge 113+ with WebGPU enabled. No server, no API key, no usage limits.</div>
+          <div class="form-hint">Runs fully in-browser via WebGPU. First use downloads &amp; caches the model. Requires Chrome/Edge 113+ with WebGPU enabled.</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <button class="btn btn-secondary" onclick="testWebLLM()"><i class="fa-solid fa-plug"></i> Check WebGPU</button>
@@ -858,7 +815,7 @@
   </div>
 </div>
 
-<!-- GENERIC PROMPT MODAL (replaces window.prompt, which is blocked in sandboxed iframes) -->
+<!-- GENERIC PROMPT MODAL -->
 <div class="modal-overlay hidden" id="generic-prompt-modal">
   <div class="modal" style="width:360px;">
     <div class="modal-header"><span class="modal-title" id="generic-prompt-title">Input</span><span class="modal-close" onclick="resolveGenericPrompt(null)">✕</span></div>
@@ -869,7 +826,7 @@
   </div>
 </div>
 
-<!-- GENERIC CONFIRM MODAL (replaces window.confirm, which is blocked in sandboxed iframes) -->
+<!-- GENERIC CONFIRM MODAL -->
 <div class="modal-overlay hidden" id="generic-confirm-modal">
   <div class="modal" style="width:360px;">
     <div class="modal-header"><span class="modal-title" id="generic-confirm-title">Confirm</span><span class="modal-close" onclick="resolveGenericConfirm(false)">✕</span></div>
@@ -926,6 +883,17 @@ const S = {
   problems:[], gitChanges:[],
 };
 let ftExpanded={}, previewUrl=null;
+
+// ── Mobile dropdown portal tracking ────────────────────────────────────────
+// Maps each .menu-item element to the entry created when its dropdown is
+// portaled to document.body, so we can find and restore it at close time.
+const _openMenuDropdowns = new Map();
+
+// Returns true only on narrow portrait phones — used to gate the portal logic
+// so the desktop layout is completely unchanged.
+function isMobilePortrait(){
+  return window.matchMedia('(max-width:768px) and (orientation:portrait)').matches;
+}
 
 // ══ UTILS ════════════════════════════════════════════════════════════════
 function lang(f){const e=f.split('.').pop().toLowerCase();const m={js:'JavaScript',jsx:'JavaScript(JSX)',ts:'TypeScript',tsx:'TypeScript(TSX)',py:'Python',html:'HTML',css:'CSS',json:'JSON',md:'Markdown',rs:'Rust',go:'Go',java:'Java',cpp:'C++',c:'C',cs:'C#',php:'PHP',rb:'Ruby',swift:'Swift',kt:'Kotlin',sh:'Shell',sql:'SQL',yaml:'YAML',yml:'YAML',toml:'TOML',xml:'XML',vue:'Vue',svelte:'Svelte'};return m[e]||'Plain Text';}
@@ -1022,18 +990,16 @@ function buildPreview(){
   const entry=S.activeTab&&/\.html?$/i.test(S.activeTab)?S.activeTab:(htmlFiles[0]||null);
   const frame=document.getElementById('preview-frame');
   if(!entry){
-    frame.srcdoc='<html><body style="font-family:sans-serif;padding:2rem;color:#555;text-align:center;"><div style="font-size:3rem;margin-bottom:1rem;">🌐</div><h2>No HTML file found</h2><p>Create an <code>.html</code> file to preview it here.</p><p style="font-size:13px;color:#888;margin-top:1rem;">Tip: Load the Sample Project to see a working example.</p></body></html>';
+    frame.srcdoc='<html><body style="font-family:sans-serif;padding:2rem;color:#555;text-align:center;"><div style="font-size:3rem;margin-bottom:1rem;">🌐</div><h2>No HTML file found</h2><p>Create an <code>.html</code> file to preview it here.</p></body></html>';
     document.getElementById('preview-title').textContent='Live Preview — no HTML file';
     document.getElementById('preview-url-bar').textContent='(no HTML file)';
     return;
   }
   let html=S.files[entry]?.content||'';
-  // Inline linked CSS
   html=html.replace(/<link[^>]+href=["']([^"']+\.css)["'][^>]*\/?>/gi,(match,href)=>{
     const cssFile=S.files[href]||S.files[href.replace('./','')]||S.files[entry.split('/').slice(0,-1).concat(href).join('/')];
     return cssFile?`<style>/* ${href} */\n${cssFile.content}\n</style>`:match;
   });
-  // Inline local JS src
   html=html.replace(/<script([^>]*)src=["']([^"']+)["']([^>]*)><\/script>/gi,(match,pre,src,post)=>{
     if(/^https?:|^\/\//.test(src))return match;
     const jsFile=S.files[src]||S.files[src.replace('./','')]||S.files[entry.split('/').slice(0,-1).concat(src).join('/')];
@@ -1298,8 +1264,6 @@ async function loadWebLLMModel(modelId){
 async function callWebLLM(messages,sys){
   const modelId=S.ai.webllmModel;
   const engine=await loadWebLLMModel(modelId);
-  // Small models (0.5B/1.5B) have limited context windows; clamp max_tokens so an
-  // overly large value (e.g. 4096+) doesn't cause the engine to silently fail/ignore output.
   let maxTok=S.ai.maxTokens;
   if(!Number.isFinite(maxTok)||maxTok<=0)maxTok=1024;
   const cap=/0\.5B|1\.5B/i.test(modelId)?1024:(/3B/i.test(modelId)?2048:4096);
@@ -1308,32 +1272,18 @@ async function callWebLLM(messages,sys){
   return reply.choices?.[0]?.message?.content||'';
 }
 
-// ══ AI TOOL ACTIONS (code injection / file tree creation) ════════════════
-// The AI can emit special fenced blocks which the IDE parses and executes:
-//   ```file:path/to/file.ext
-//   ...content...
-//   ```
-//   ```insert
-//   ...content to insert at cursor/selection in the active file...
-//   ```
-//   ```replace
-//   ...content to replace the current selection (or whole file if none) ...
-//   ```
+// ══ AI TOOL ACTIONS ════════════════════════════════════════════════════
 function buildToolsSystemNote(){
   const active=S.activeTab?` The user's currently open file is "${S.activeTab}".`:'';
   return `\n\nIMPORTANT — FILE EDITING RULES:\nYou are operating inside a code editor that can apply your code directly to the user's project. NEVER tell the user to copy/paste code manually. Instead:\n- If you are rewriting or fixing the CURRENT file, respond with ONE single fenced code block containing the COMPLETE new file contents, using the real language tag, e.g. \`\`\`javascript ... \`\`\`. Do not split it into multiple snippets.\n- If you are creating or editing a DIFFERENT/NEW file, start the fence with "file:" followed by the path, e.g. \`\`\`file:src/utils.js ... \`\`\`, containing the COMPLETE file contents.\n- Always output the FULL file contents in the block, not a diff or partial snippet, so it can be applied directly.\n- You may add a short explanation before or after the code block, but the code block itself must contain only code (no commentary inside it).${active}`;
 }
-// Parse AI response for applicable code blocks. Returns {text, blocks:[{path?,lang,code,target}]}
-// target: 'file' (explicit path), 'active' (apply to current open file)
 function parseAIBlocks(text){
   const blocks=[];
-  // 1) Explicit file:<path> blocks (always safe to auto-apply — explicit intent)
   text=text.replace(/```file:([^\n`]+)\n([\s\S]*?)```/g,(m,path,code)=>{
     path=path.trim();
     blocks.push({path,code:code.replace(/\n$/,''),target:'file',autoApply:true});
     return `\n\u0000BLOCK${blocks.length-1}\u0000\n`;
   });
-  // 2) insert / replace blocks (legacy support, auto-apply to active file)
   text=text.replace(/```insert\n([\s\S]*?)```/g,(m,code)=>{
     blocks.push({code:code.replace(/\n$/,''),target:'insert',autoApply:true});
     return `\n\u0000BLOCK${blocks.length-1}\u0000\n`;
@@ -1342,8 +1292,6 @@ function parseAIBlocks(text){
     blocks.push({code:code.replace(/\n$/,''),target:'active',autoApply:true});
     return `\n\u0000BLOCK${blocks.length-1}\u0000\n`;
   });
-  // 3) Plain fenced code blocks (```js, ```python, ``` etc.) — common for small models.
-  //    Treat as a full-file rewrite candidate for the active file, shown with an Apply button.
   text=text.replace(/```([a-zA-Z0-9_+\-]*)\n([\s\S]*?)```/g,(m,tag,code)=>{
     code=code.replace(/\n$/,'');
     if(!code.trim())return m;
@@ -1352,9 +1300,7 @@ function parseAIBlocks(text){
   });
   return {text,blocks};
 }
-// Render text with \u0000BLOCKn\u0000 placeholders replaced by actual block UI
 function renderBlocks(text,blocks,msgIndex){
-  // First, format everything except our placeholders as markdown
   const parts=text.split(/\u0000BLOCK(\d+)\u0000/);
   let html='';
   for(let i=0;i<parts.length;i++){
@@ -1440,7 +1386,6 @@ function mkFileFromAI(path,content){
   addGitChange(path,existed?'M':'A');
   renderTree();
   if(S.activeTab===path){editor.value=content;}
-  if(!S.openTabs.includes(path)){/* don't auto-open, just show in tree */}
 }
 function insertAtCursor(snippet){
   if(!S.activeTab){tw('AI tried to insert code but no file is open.','warn');return;}
@@ -1475,7 +1420,6 @@ async function sendAIMessage(){
     const {text,blocks}=parseAIBlocks(r);
     th.remove();
     const msgIndex=aiMsgWithBlocks(text,blocks);
-    // Auto-apply explicit file:/insert/replace blocks
     let applied=0;
     blocks.forEach(b=>{
       if(!b.autoApply)return;
@@ -1579,37 +1523,137 @@ function persist(){try{localStorage.setItem('nide_ai',JSON.stringify(S.ai));loca
 function hydrate(){try{const ai=localStorage.getItem('nide_ai');if(ai)Object.assign(S.ai,JSON.parse(ai));const gh=localStorage.getItem('nide_gh');if(gh)Object.assign(S.gh,JSON.parse(gh));}catch(e){}}
 
 // ══ MODALS / PANELS / ACTIVITY ════════════════════════════════════════
-// ══ MOBILE MENU DROPDOWNS (tap-to-open, since :hover doesn't work on touch) ══
-const mobileMenuMQ=window.matchMedia('(max-width: 768px) and (orientation: portrait)');
+
+// ══ MOBILE MENU DROPDOWNS ══════════════════════════════════════════════
+//
+// ROOT CAUSE OF THE MOBILE BUG:
+//   #header-scroll has overflow-x:auto.  The CSS overflow interaction rule
+//   states that when one axis is non-visible the other computed value cannot
+//   be 'visible' — so overflow-y silently becomes 'auto' too.  That turns
+//   #header-scroll into a scroll container that clips any upward-opening
+//   dropdown, even a position:fixed one on some browsers/WebViews.
+//
+// FIX — PORTAL PATTERN (mobile only):
+//   When a dropdown is opened on a mobile portrait viewport we detach it
+//   from its .menu-item parent and re-attach it directly to <body>.  From
+//   there it is never clipped, and its position:fixed + z-index:99999 inline
+//   styles guarantee it paints above every other element.  On close we
+//   restore it to its original DOM position so desktop behaviour is
+//   completely unaffected (the portal branch is never entered on desktop).
+//
 function toggleMobileMenu(menuItem,e){
-  if(!mobileMenuMQ.matches)return; // desktop keeps hover behavior untouched
   const target=e.target;
-  // If the tap landed on an item INSIDE the dropdown (a .menu-dd-item or its
-  // children), let that item's own onclick run normally and just close the menu.
+  // Dropdown may already be portaled to <body>; look it up in the map first.
+  const mapEntry=_openMenuDropdowns.get(menuItem);
+  const dropdown=(mapEntry&&mapEntry.dropdown)||menuItem.querySelector('.menu-dropdown');
+  if(!dropdown)return;
+  // Tap landed on a dropdown item — let its onclick fire, then close.
   if(target.closest('.menu-dd-item')){
-    menuItem.classList.remove('menu-open');
+    closeMobileDropdown(menuItem,dropdown);
     return;
   }
   e.stopPropagation();
   const wasOpen=menuItem.classList.contains('menu-open');
-  document.querySelectorAll('.menu-item.menu-open').forEach(m=>m.classList.remove('menu-open'));
-  if(!wasOpen)menuItem.classList.add('menu-open');
+  closeAllMobileDropdowns();
+  if(!wasOpen)openMobileDropdown(menuItem,dropdown);
 }
-// Tapping anywhere outside an open menu closes it.
-document.addEventListener('click',e=>{
-  if(!mobileMenuMQ.matches)return;
-  if(!e.target.closest('.menu-item')){
-    document.querySelectorAll('.menu-item.menu-open').forEach(m=>m.classList.remove('menu-open'));
+
+function openMobileDropdown(menuItem,dropdown){
+  menuItem.classList.add('menu-open');
+
+  // ── PORTAL: move the dropdown to <body> on mobile portrait ───────────
+  // This is the only change vs. the original code.  It runs exclusively on
+  // narrow portrait viewports; the desktop path is completely unchanged.
+  if(isMobilePortrait()&&dropdown.parentElement!==document.body){
+    const entry={
+      dropdown,
+      origParent:dropdown.parentElement,
+      origNextSibling:dropdown.nextSibling,
+    };
+    // Close the dropdown when any item inside it is tapped.
+    // (The item's own onclick fires first, then our handler closes the menu.)
+    entry.clickHandler=function(ev){
+      if(ev.target.closest('.menu-dd-item'))closeAllMobileDropdowns();
+    };
+    dropdown.addEventListener('click',entry.clickHandler);
+    document.body.appendChild(dropdown);   // escape the overflow container
+    _openMenuDropdowns.set(menuItem,entry);
   }
-},true);
+
+  // ── Position the now-free-floating dropdown ──────────────────────────
+  const rect=menuItem.getBoundingClientRect();
+  const vh=window.innerHeight;
+  const vw=window.innerWidth;
+  // Header is fixed at the bottom on mobile, so rect.top > vh/2 → open upward
+  const openUpward=rect.top>vh/2;
+  const leftPos=Math.max(4,Math.min(rect.left,vw-208))+'px';
+
+  // Set every needed style in one cssText assignment so nothing from the
+  // stylesheet can partially override an individual property assignment.
+  dropdown.style.cssText=
+    'display:block!important;'+
+    'position:fixed!important;'+
+    'z-index:99999!important;'+
+    'min-width:200px;'+
+    'max-width:'+(vw-8)+'px;'+
+    'max-height:55vh;'+
+    'overflow-y:auto;'+
+    'overflow-x:hidden;'+
+    'background:var(--bg-2);'+
+    'border:1px solid var(--border);'+
+    'box-shadow:0 8px 32px rgba(0,0,0,.9);'+
+    (openUpward
+      ?'bottom:'+(vh-rect.top)+'px;top:auto;'
+      :'top:'+rect.bottom+'px;bottom:auto;')+
+    'left:'+leftPos+';right:auto;';
+}
+
+function closeMobileDropdown(menuItem,dropdown){
+  menuItem.classList.remove('menu-open');
+  const entry=_openMenuDropdowns.get(menuItem);
+  _openMenuDropdowns.delete(menuItem);
+  // Resolve the dropdown element from the map if not passed directly
+  if(!dropdown&&entry)dropdown=entry.dropdown;
+  if(!dropdown)return;
+  // Remove the item-click handler that was attached during portaling
+  if(entry&&entry.clickHandler)dropdown.removeEventListener('click',entry.clickHandler);
+  // Restore dropdown to its original position in the DOM
+  if(entry&&entry.origParent){
+    try{
+      if(entry.origNextSibling&&
+         entry.origNextSibling.isConnected&&
+         entry.origNextSibling.parentNode===entry.origParent){
+        entry.origParent.insertBefore(dropdown,entry.origNextSibling);
+      }else{
+        entry.origParent.appendChild(dropdown);
+      }
+    }catch(e){
+      try{entry.origParent.appendChild(dropdown);}catch(e2){/* ignore */}
+    }
+  }
+  dropdown.style.cssText='';
+}
+
+function closeAllMobileDropdowns(){
+  // Close every portaled dropdown tracked in the map
+  _openMenuDropdowns.forEach((entry,menuItem)=>
+    closeMobileDropdown(menuItem,entry.dropdown));
+  // Belt-and-suspenders: also clear any .menu-open classes not in the map
+  document.querySelectorAll('.menu-item.menu-open').forEach(m=>
+    m.classList.remove('menu-open'));
+}
+
+// Close open menus when the user taps anywhere outside them.
+// We also exclude taps inside a portaled .menu-dropdown (which lives in
+// <body>, not inside .menu-item, so the old check would have fired wrongly).
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.menu-item')&&!e.target.closest('.menu-dropdown'))
+    closeAllMobileDropdowns();
+});
 
 function closeModal(id){document.getElementById(id).classList.add('hidden');}
 
 // ══ SANDBOX-SAFE PROMPT / CONFIRM ════════════════════════════════════════
-// window.prompt() / window.confirm() are blocked or silently return
-// null/false inside sandboxed iframes (e.g. Claude artifact previews) and
-// some mobile webviews. These helpers provide drop-in async replacements
-// backed by the generic modals above.
 let _genericPromptResolve=null;
 let _genericConfirmResolve=null;
 function askPrompt(message,defaultValue,label){
@@ -1700,22 +1744,13 @@ document.addEventListener('keydown',e=>{
   if(e.ctrlKey&&e.key==='-'){e.preventDefault();changeFontSize(-1);}
   if(e.altKey&&e.key==='z'){e.preventDefault();toggleWordWrap();}
   if(e.key==='F5'){e.preventDefault();runCode();}
-  // Block accidental browser-refresh shortcuts (Ctrl+R / Cmd+R) — these can wipe
-  // an in-progress WebLLM model download/cache before it finishes.
-  if((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R')){e.preventDefault();tw('Page refresh is disabled in NativeIDE to avoid interrupting model downloads or losing unsaved work.','warn');}
+  if((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R')){e.preventDefault();tw('Page refresh is disabled in SprizzleIDE to avoid interrupting model downloads or losing unsaved work.','warn');}
 });
 
-// ══ PREVENT ACCIDENTAL UNLOAD / REFRESH ═══════════════════════════════
-// Warn before leaving the page while a WebLLM model is downloading, or if there
-// are unsaved changes — this prevents a refresh from silently deleting a
-// partially-downloaded/cached model or losing edits.
+// ══ PREVENT ACCIDENTAL UNLOAD ════════════════════════════════════════════
 window.addEventListener('beforeunload',e=>{
   const hasUnsaved=Object.values(S.files).some(f=>f.modified);
-  if(webllmLoading||hasUnsaved){
-    e.preventDefault();
-    e.returnValue='';
-    return '';
-  }
+  if(webllmLoading||hasUnsaved){e.preventDefault();e.returnValue='';return '';}
 });
 
 // ══ SAMPLE PROJECT ════════════════════════════════════════════════════
@@ -1736,9 +1771,8 @@ function loadSampleProject(){
 hydrate();
 
 tw('SprizzleIDE v2.5  |  Mobile View + GitHub + Live Preview + WebLLM edition');
-//tw("Local LLM issues: set OLLAMA_ORIGINS=* to fix Ollama CORS, then restart Ollama",'info');
-tw ('ALERT: This is a free-to-use project. All processing takes place in the RAM on your device. None of your data is ever stored or sent to my server. For this reason, any files that are not downloaded or pushed to github will be lost when you close or refresh the page.','err')
-tw ('If you would like to see more interesting projects like this in the future, please consider donating to my Venmo (@Vani-gaji) or my LTC wallet (MDqV1Dkpa6FXVb6ZHmtZVXX93fMbE7dohZ)')
+tw('ALERT: This is a free-to-use project. All processing takes place in the RAM on your device. None of your data is ever stored or sent to my server. For this reason, any files that are not downloaded or pushed to github will be lost when you close or refresh the page.','err');
+tw('If you would like to see more interesting projects like this in the future, please consider donating to my Venmo (@Vani-gaji) or my LTC wallet (MDqV1Dkpa6FXVb6ZHmtZVXX93fMbE7dohZ)');
 tw('Type "help" for commands list. Terminal is case sensitive','info');
 
 (function initAI(){
@@ -1777,26 +1811,18 @@ if(S.gh.token){ghLoadUser().then(()=>ghLoadRepos());}
 renderTree();renderTabs();
 
 // ══ MOBILE: TAP-TO-FOCUS PANEL SHUFFLE ════════════════════════════════════
-// Only visually active on narrow portrait viewports (CSS media query above
-// gates all of this with flex `order` + aspect-ratio rules). Desktop
-// drag-resize (initResize) and layout are completely untouched — this only
-// ever sets inline `order` styles and toggles a class, which the desktop
-// media query doesn't read at all.
 (function setupMobilePanels(){
   const mq=window.matchMedia('(max-width: 768px) and (orientation: portrait)');
   const mainEl=document.getElementById('main');
-  const panelIds=['editor-area','sidebar','bottom-panel','ai-panel']; // default top-to-bottom order
+  const panelIds=['editor-area','sidebar','bottom-panel','ai-panel'];
   const panels=panelIds.map(id=>document.getElementById(id)).filter(Boolean);
 
-  // Current top-to-bottom stacking order, by element reference.
   let stack=panels.slice();
-  let activePanel=panels[0]; // editor starts active/focused
+  let activePanel=panels[0];
 
   function isMobile(){return mq.matches;}
 
   function applyOrder(){
-    // Position 2 (1-indexed, just after activity bar) is the "center-ish" slot
-    // for a 4-item stack — that's where the active/focused panel goes.
     stack.forEach((p,i)=>{ p.style.order=String(i+1); });
     panels.forEach(p=>p.classList.toggle('mobile-panel-active',p===activePanel));
   }
@@ -1804,11 +1830,8 @@ renderTree();renderTabs();
   function focusPanel(panel){
     if(panel===activePanel)return;
     const prevActive=activePanel;
-    // Remove both the clicked panel and the previously-active panel from the stack.
     stack=stack.filter(p=>p!==panel&&p!==prevActive);
-    // New active panel goes to slot index 1 (2nd position = center of the stack).
     stack.splice(1,0,panel);
-    // Previously-active panel goes to the very bottom.
     stack.push(prevActive);
     activePanel=panel;
     applyOrder();
@@ -1818,13 +1841,6 @@ renderTree();renderTabs();
     panels.forEach(p=>{p.style.order='';p.classList.remove('mobile-panel-active');});
   }
 
-  // Single delegated listener, capture phase, so it runs before any other
-  // onclick handlers and isn't blocked by stopPropagation() elsewhere.
-  // IMPORTANT: clicks on interactive elements (buttons, links, inputs,
-  // textareas, selects, or anything with its own onclick/role=button) are
-  // left completely alone — only taps on "empty" panel chrome trigger a
-  // focus-shuffle. This prevents the shuffle from interfering with AI
-  // action buttons, file-tree items, terminal input, etc.
   document.addEventListener('click',function(e){
     if(!isMobile())return;
     const target=e.target;
@@ -1834,16 +1850,74 @@ renderTree();renderTabs();
     if(clickedPanel)focusPanel(clickedPanel);
   },true);
 
-  // Initialize order on load (if starting in mobile portrait).
   if(isMobile())applyOrder();
 
-  // Re-apply or clear ordering when entering/leaving mobile portrait.
   function handleViewportChange(){
     if(isMobile())applyOrder();
     else resetInlineStyles();
   }
   mq.addEventListener?.('change',handleViewportChange);
   window.addEventListener('resize',handleViewportChange);
+})();
+
+// ══ iOS SAFARI LANDSCAPE: auto-dismiss the URL bar ════════════════════════
+// Problem: iOS Safari in landscape keeps a ~50 px compact URL bar visible
+// at the top unless the page has something to scroll. The IDE sets
+// overflow:hidden on html/body so there is nothing to scroll — Safari never
+// gets the signal to collapse the bar, and it permanently eats screen space.
+//
+// Fix: on every landscape entry we briefly unlock overflow, nudge the scroll
+// position by 1 px (that single pixel is enough for Safari to read as a
+// scroll gesture and collapse its bar), then instantly restore overflow:hidden.
+// The bar stays hidden for the rest of that landscape session and only
+// reappears if the user taps it back. No-ops on Android / desktop.
+(function setupLandscapeURLBarHide(){
+  // Detect iPhone / iPad (including newer iPads that report 'MacIntel'
+  // but expose touch points).
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if(!isIOS) return;
+
+  function attemptHide(){
+    // Only act when the viewport is actually in landscape.
+    if(window.innerWidth <= window.innerHeight) return;
+
+    const root = document.documentElement;
+
+    // Snapshot the current inline style text so we can restore it exactly,
+    // including any styles that other parts of the IDE may have set.
+    const savedRoot = root.style.cssText;
+    const savedBody = document.body.style.cssText;
+
+    // Temporarily allow the document-level scroll that Safari needs to
+    // detect in order to collapse the URL bar.
+    root.style.cssText  = 'overflow:scroll!important;height:auto!important;';
+    document.body.style.cssText = 'overflow:scroll!important;height:auto!important;';
+
+    // One pixel is all Safari needs — scroll down then immediately back.
+    window.scrollTo(0, 1);
+
+    requestAnimationFrame(function(){
+      window.scrollTo(0, 0);
+
+      // Restore overflow:hidden after a short pause so Safari finishes
+      // its bar-collapse animation before we lock things back down.
+      setTimeout(function(){
+        root.style.cssText  = savedRoot;
+        document.body.style.cssText = savedBody;
+      }, 80);
+    });
+  }
+
+  // Trigger after each rotation, giving the browser ~450 ms to finish
+  // its own resize/reflow before we try to scroll.
+  const onRotate = function(){ setTimeout(attemptHide, 450); };
+  window.addEventListener('orientationchange', onRotate);
+  // Modern API — harmless to attach on iOS too; Safari silently ignores it.
+  try { screen.orientation.addEventListener('change', onRotate); } catch(e){}
+
+  // Also try on initial load in case the user opens the page in landscape.
+  setTimeout(attemptHide, 600);
 })();
 </script>
 </body>
