@@ -1635,12 +1635,17 @@ function closeMobileDropdown(menuItem,dropdown){
 }
 
 function closeAllMobileDropdowns(){
-  // Close every portaled dropdown tracked in the map
+  // Close every portaled dropdown tracked in the map (mobile path)
   _openMenuDropdowns.forEach((entry,menuItem)=>
     closeMobileDropdown(menuItem,entry.dropdown));
-  // Belt-and-suspenders: also clear any .menu-open classes not in the map
-  document.querySelectorAll('.menu-item.menu-open').forEach(m=>
-    m.classList.remove('menu-open'));
+  // For desktop (non-portaled) menus we must ALSO clear the inline cssText
+  // that openMobileDropdown always writes — otherwise display:block!important
+  // survives the removal of .menu-open and the dropdown stays visible.
+  document.querySelectorAll('.menu-item.menu-open').forEach(m=>{
+    m.classList.remove('menu-open');
+    const dd=m.querySelector('.menu-dropdown');
+    if(dd)dd.style.cssText='';
+  });
 }
 
 // Close open menus when the user taps anywhere outside them.
