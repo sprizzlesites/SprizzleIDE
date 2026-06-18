@@ -805,7 +805,7 @@ const S = {
   preset:'ollama',
   problems:[], gitChanges:[],
 };
-let ftExpanded={}, previewUrl=null;
+let ftExpanded={}, previewUrl=null, selSnapshot='', lastHtmlTab=null;
 
 const _openMenuDropdowns = new Map();
 function isMobilePortrait(){return window.matchMedia('(max-width:768px) and (orientation:portrait)').matches;}
@@ -849,6 +849,10 @@ function renderTabs(){
 function openTab(path){
   if(!S.openTabs.includes(path))S.openTabs.push(path);
   S.activeTab=path;
+  if(/\.html?$/i.test(path))lastHtmlTab=path;
+  // Clear selection snapshot and deactivate chip on tab change
+  selSnapshot='';
+  if(S.ctx.selection){S.ctx.selection=false;document.getElementById('ctx-selection')?.classList.remove('active');updateCtxTokenBar();}
   document.getElementById('welcome').style.display='none';
   const ed=document.getElementById('editor');
   ed.classList.remove('hidden');ed.value=S.files[path]?.content||'';
@@ -935,6 +939,23 @@ editor.addEventListener('keydown',e=>{
   if(e.key==='F5'){e.preventDefault();runCode();}
 });
 editor.addEventListener('keyup',updateCursor);editor.addEventListener('click',updateCursor);
+
+// ── SELECTION SNAPSHOT ─────────────────────────────────────────────────
+// Poll every 100ms while the editor has focus — the only approach that is
+// immune to browser focus-transfer timing (mousedown/blur fire too late on
+// most browsers/mobile to catch the selection before it's cleared).
+function snapSelIfEditor(){
+  if(document.activeElement!==editor)return;
+  const s=editor.selectionStart,e=editor.selectionEnd;
+  if(s!==e){
+    selSnapshot=editor.value.substring(s,e);
+    if(!S.ctx.selection){S.ctx.selection=true;document.getElementById('ctx-selection')?.classList.add('active');updateCtxTokenBar();}
+  }
+}
+setInterval(snapSelIfEditor,100);
+// Also fire immediately on mousedown/touchstart as a best-effort early capture
+document.addEventListener('mousedown',snapSelIfEditor);
+document.addEventListener('touchstart',snapSelIfEditor,{passive:true});
 function updateCursor(){const v=editor.value.substring(0,editor.selectionStart).split('\n');document.getElementById('cursor-pos').textContent=`Ln ${v.length}, Col ${v[v.length-1].length+1}`;}
 function editorCmd(cmd){editor.focus();document.execCommand(cmd);}
 function changeFontSize(d){S.fontSize=Math.max(8,Math.min(32,S.fontSize+d));editor.style.fontSize=S.fontSize+'px';}
@@ -947,7 +968,20 @@ function setAccentColor(c){document.documentElement.style.setProperty('--accent'
 function openLivePreview(){document.getElementById('preview-modal').classList.remove('hidden');buildPreview();}
 function buildPreview(){
   const htmlFiles=Object.keys(S.files).filter(f=>/\.html?$/i.test(f));
-  const entry=S.activeTab&&/\.html?$/i.test(S.activeTab)?S.activeTab:(htmlFiles[0]||null);
+  // Priority: 1) active tab if it's HTML  2) last HTML tab opened  3) HTML in same dir as active tab  4) first HTML file found
+  let entry=null;
+  if(S.activeTab&&/\.html?$/i.test(S.activeTab)){
+    entry=S.activeTab;
+  }else if(lastHtmlTab&&S.files[lastHtmlTab]){
+    entry=lastHtmlTab;
+  }else if(htmlFiles.length){
+    if(S.activeTab){
+      const dir=S.activeTab.includes('/')?S.activeTab.split('/').slice(0,-1).join('/'):'';
+      entry=htmlFiles.find(f=>(f.includes('/')?f.split('/').slice(0,-1).join('/'):'')===dir)||htmlFiles[0];
+    }else{
+      entry=htmlFiles[0];
+    }
+  }
   const frame=document.getElementById('preview-frame');
   if(!entry){frame.srcdoc='<html><body style="font-family:sans-serif;padding:2rem;color:#555;text-align:center;"><div style="font-size:3rem;margin-bottom:1rem;">🌐</div><h2>No HTML file found</h2><p>Create an <code>.html</code> file to preview it here.</p></body></html>';document.getElementById('preview-title').textContent='Live Preview — no HTML file';document.getElementById('preview-url-bar').textContent='(no HTML file)';return;}
   let html=S.files[entry]?.content||'';
@@ -998,8 +1032,11 @@ function handleTermInput(e){
   else if(e.ctrlKey&&e.key==='l'){e.preventDefault();clearTerminal();}
 }
 function runCode(){
+  if(!S.activeTab&&!lastHtmlTab)return;
+  if(S.activeTab&&/\.html?$/i.test(S.activeTab)){openLivePreview();return;}
+  // If no HTML tab is active but we know the last HTML file, offer preview
+  if(lastHtmlTab&&S.files[lastHtmlTab]){openLivePreview();return;}
   if(!S.activeTab)return;
-  if(/\.html?$/i.test(S.activeTab)){openLivePreview();return;}
   switchPanelTabById('terminal');
   const l=lang(S.activeTab),name=S.activeTab.split('/').pop();
   tw(`─── Running: ${name} ───`,'info');
@@ -1231,7 +1268,7 @@ function aiMsgWithBlocks(text,blocks){
 }
 function fmtAI(t){t=t.replace(/```(\w*)\n([\s\S]*?)```/g,(_,l,c)=>`<pre><code>${esc(c.trim())}</code></pre>`);t=t.replace(/`([^`]+)`/g,'<code style="background:var(--bg-0);padding:1px 4px;border-radius:3px;font-size:11px;">$1</code>');t=t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');t=t.replace(/\n/g,'<br>');return t;}
 function aiThink(){const msgs=document.getElementById('ai-messages');const div=document.createElement('div');div.className='ai-msg assistant';div.innerHTML='<div class="ai-thinking"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div></div>';msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;return div;}
-function getsel(){const s=editor.selectionStart,e=editor.selectionEnd;return s!==e?editor.value.substring(s,e):null;}
+function getsel(){const s=editor.selectionStart,e=editor.selectionEnd;if(s!==e){selSnapshot=editor.value.substring(s,e);return selSnapshot;}return selSnapshot||null;}
 function clearAIChat(){
   S.aiHistory=[];S.aiBlocks=[];
   document.getElementById('ai-messages').innerHTML='<div class="ai-msg system">Chat cleared.</div>';
