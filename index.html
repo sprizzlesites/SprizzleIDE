@@ -209,6 +209,9 @@
   #preview-frame{width:100%;flex:1;border:none;background:#fff;}
   /* ── ctx-token-bar: make the fill bar visible on all backgrounds ── */
   #ctx-token-bar{user-select:none;}
+  /* ── drag & drop explorer ── */
+  #files-panel.drop-active{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--accent-dim);}
+  #files-panel.drop-active #file-tree{opacity:.45;pointer-events:none;}
 
   @media (max-width: 768px) and (orientation: portrait) {
     html{background:var(--bg-0);}
@@ -558,7 +561,7 @@
         <div class="form-group">
           <div class="form-label">Model</div>
           <select class="form-select" id="cfg-webllm-model">
-            <option value="Qwen3-0.6B-q0f16-MLC">Qwen3 0.6B q0f16 (default — tiny &amp; fast, ~0.4GB)</option>
+            <option value="Qwen3-0.6B-q4f16_1-MLC">Qwen3 0.6B q4f16 (default — tiny &amp; fast, ~0.4GB)</option>
             <option value="Qwen2.5-Coder-0.5B-Instruct-q4f16_1-MLC">Qwen2.5-Coder 0.5B q4f16 (~0.5GB)</option>
             <option value="Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC">Qwen2.5-Coder 1.5B q4f16 (~1.5GB)</option>
             <option value="Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC">Qwen2.5-Coder 3B q4f16 (~3GB)</option>
@@ -792,7 +795,7 @@
 // ══ STATE ══════════════════════════════════════════════════════════════════
 const S = {
   files:{}, openTabs:[], activeTab:null, activeActivity:'files',
-  ai:{ backend:'webllm', webllmModel:'Qwen3-0.6B-q0f16-MLC', ollamaUrl:'http://localhost:11434', ollamaModel:'qwen2.5-coder:7b', lmstudioUrl:'http://localhost:1234/v1', lmstudioModel:'', openaiUrl:'https://api.openai.com/v1', openaiKey:'', openaiModel:'gpt-4o', anthropicKey:'', anthropicModel:'claude-sonnet-4-6', systemPrompt:"You are an expert coding assistant. Help the user write clean, efficient, well-documented code. When providing code, use markdown code blocks with the appropriate language tag. You have access to tools for creating files and inserting code directly into the user's editor — use them when the user asks you to create, write, or insert code.", maxTokens:4096, temperature:0.2, contextWindow:4096 },
+  ai:{ backend:'webllm', webllmModel:'Qwen3-0.6B-q4f16_1-MLC', ollamaUrl:'http://localhost:11434', ollamaModel:'qwen2.5-coder:7b', lmstudioUrl:'http://localhost:1234/v1', lmstudioModel:'', openaiUrl:'https://api.openai.com/v1', openaiKey:'', openaiModel:'gpt-4o', anthropicKey:'', anthropicModel:'claude-sonnet-4-6', systemPrompt:"You are an expert coding assistant. Help the user write clean, efficient, well-documented code. When providing code, use markdown code blocks with the appropriate language tag. You have access to tools for creating files and inserting code directly into the user's editor — use them when the user asks you to create, write, or insert code.", maxTokens:4096, temperature:0.2, contextWindow:4096 },
   gh:{ token:'', branch:'main', commitName:'', commitEmail:'', currentRepo:null, currentBranch:'main' },
   ghUser:null, ghRepos:[],
   aiConnected:false, aiHistory:[], aiBlocks:[],
@@ -872,6 +875,51 @@ function openFileDialog(){document.getElementById('file-open-input').click();}
 function openFolderDialog(){document.getElementById('folder-open-input').click();}
 function handleFileOpen(input){Array.from(input.files).forEach(file=>{const r=new FileReader();r.onload=e=>{S.files[file.name]={content:e.target.result,lang:lang(file.name),modified:false};renderTree();openTab(file.name);};r.readAsText(file);});input.value='';}
 function handleFolderOpen(input){const files=Array.from(input.files);let done=0;files.forEach(file=>{const r=new FileReader();r.onload=e=>{const p=file.webkitRelativePath||file.name;try{S.files[p]={content:e.target.result,lang:lang(file.name),modified:false};}catch(err){S.files[p]={content:'[Binary]',lang:'Plain Text',modified:false};}done++;if(done===files.length){renderTree();tw(`Opened folder: ${files.length} files`,'info');}};r.onerror=()=>done++;r.readAsText(file);});input.value='';}
+
+// ══ DRAG & DROP ONTO EXPLORER (desktop) ══════════════════════════════
+(function setupDropZone(){
+  // Skip on pure-touch devices (no fine pointer = no drag source)
+  if(!window.matchMedia('(pointer:fine)').matches)return;
+  const zone=document.getElementById('files-panel');
+  if(!zone)return;
+  let dragDepth=0;
+  zone.addEventListener('dragenter',e=>{e.preventDefault();if(++dragDepth===1)zone.classList.add('drop-active');});
+  zone.addEventListener('dragleave',e=>{e.preventDefault();if(--dragDepth===0)zone.classList.remove('drop-active');});
+  zone.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});
+  zone.addEventListener('drop',e=>{
+    e.preventDefault();dragDepth=0;zone.classList.remove('drop-active');
+    const items=Array.from(e.dataTransfer.items||[]);
+    const entries=items.map(i=>i.webkitGetAsEntry?i.webkitGetAsEntry():null).filter(Boolean);
+    if(!entries.length){
+      // Fallback for browsers without webkitGetAsEntry
+      const files=Array.from(e.dataTransfer.files||[]);
+      let done=0;
+      files.forEach(file=>{const r=new FileReader();r.onload=ev=>{S.files[file.name]={content:ev.target.result,lang:lang(file.name),modified:false};renderTree();done++;if(done===files.length){if(files.length===1)openTab(file.name);else tw(`Dropped ${files.length} files`,'info');}};r.onerror=()=>done++;r.readAsText(file);});
+      return;
+    }
+    let total=0,done=0;
+    function finish(path){done++;renderTree();if(done===total){if(total===1)openTab(path);else tw(`Dropped ${total} file${total!==1?'s':''}. ${total} item${total!==1?'s':''} added to explorer.`,'info');}}
+    function readEntry(entry,dir){
+      if(entry.isFile){
+        total++;
+        const filePath=dir?dir+'/'+entry.name:entry.name;
+        entry.file(file=>{
+          const r=new FileReader();
+          r.onload=ev=>{S.files[filePath]={content:ev.target.result,lang:lang(entry.name),modified:false};finish(filePath);};
+          r.onerror=()=>{done++;if(done===total)tw(`Dropped ${done} file${done!==1?'s':''}. Some could not be read.`,'warn');};
+          r.readAsText(file);
+        });
+      }else if(entry.isDirectory){
+        const subDir=dir?dir+'/'+entry.name:entry.name;
+        const reader=entry.createReader();
+        (function readBatch(){reader.readEntries(batch=>{if(!batch.length)return;batch.forEach(e=>readEntry(e,subDir));readBatch();});})();
+      }
+    }
+    entries.forEach(e=>readEntry(e,''));
+    // If nothing valid was dropped (e.g. all dirs with no files) show hint after settle
+    setTimeout(()=>{if(total===0)tw('Drop contained no readable text files.','warn');},800);
+  });
+})();
 function saveFile(){if(!S.activeTab)return;S.files[S.activeTab].content=document.getElementById('editor').value;S.files[S.activeTab].modified=false;addGitChange(S.activeTab,'M');renderTabs();renderTree();tw(`Saved: ${S.activeTab}`,'info');}
 async function saveFileAs(){if(!S.activeTab)return;const n=await askPrompt('Save As',S.activeTab,'File name');if(!n)return;S.files[n]={content:document.getElementById('editor').value,lang:lang(n),modified:false};renderTree();renderTabs();openTab(n);}
 function downloadCurrentFile(){if(!S.activeTab){tw('No file is open to download.','warn');return;}const b=new Blob([document.getElementById('editor').value],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=S.activeTab.split('/').pop();a.click();}
@@ -1446,7 +1494,7 @@ function loadSampleProject(){
 // ══ INIT ════════════════════════════════════════════════════════════
 hydrate();
 
-tw('SprizzleIDE v2.6  |  Debugged Mobile View + Qwen3 + Sliding Context Window');
+tw('SprizzleIDE v2.6  |  Mobile View + GitHub + Live Preview + WebLLM + Sliding Context Window');
 tw('ALERT: This is a free-to-use project. All processing takes place in the RAM on your device. None of your data is ever stored or sent to my server. For this reason, any files that are not downloaded or pushed to github will be lost when you close or refresh the page.','err');
 tw('If you would like to see more interesting projects like this in the future, please consider donating to my Venmo (@Vani-gaji) or my LTC wallet (MDqV1Dkpa6FXVb6ZHmtZVXX93fMbE7dohZ)');
 tw('Type "help" for commands list. Terminal is case sensitive','info');
@@ -1456,7 +1504,7 @@ tw('Type "help" for commands list. Terminal is case sensitive','info');
   // Ensure contextWindow has a valid value after hydration
   if(!S.ai.contextWindow||S.ai.contextWindow<512)S.ai.contextWindow=4096;
   if(backend==='webllm'){
-    const name=S.ai.webllmModel||'Qwen3-0.6B-q0f16-MLC';
+    const name=S.ai.webllmModel||'Qwen3-0.6B-q4f16_1-MLC';
     document.getElementById('ai-model-badge').textContent=shortModelName(name);
     document.getElementById('header-model-name').textContent=shortModelName(name);
     document.getElementById('ai-status-text').textContent=`AI: ${shortModelName(name)}`;
