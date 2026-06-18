@@ -9,7 +9,6 @@
 <meta name="theme-color" content="#0e0e10">
 <title>SprizzleIDE</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="module">
   import * as webllm from "https://esm.run/@mlc-ai/web-llm";
   window.webllm = webllm;
@@ -278,9 +277,6 @@
           <div class="menu-dd-item" onclick="saveFileAs()"><span>Save As...</span><span class="menu-dd-shortcut">Ctrl+Shift+S</span></div>
           <div class="menu-dd-sep"></div>
           <div class="menu-dd-item" onclick="downloadCurrentFile()"><span>Download File</span></div>
-          <div class="menu-dd-sep"></div>
-          <div class="menu-dd-item" onclick="exportProjectZip()"><span>Export Project as ZIP</span></div>
-          <div class="menu-dd-item" onclick="document.getElementById('zip-import-input').click()"><span>Import ZIP...</span></div>
         </div>
       </div>
       <div class="menu-item" onclick="toggleMobileMenu(this,event)">Edit
@@ -794,7 +790,6 @@
 <div class="ctx-menu hidden" id="context-menu"></div>
 <input type="file" id="file-open-input" style="display:none" onchange="handleFileOpen(this)">
 <input type="file" id="folder-open-input" style="display:none" webkitdirectory onchange="handleFolderOpen(this)">
-<input type="file" id="zip-import-input" style="display:none" accept=".zip" onchange="handleZipImport(this)">
 
 <script>
 // ══ STATE ══════════════════════════════════════════════════════════════════
@@ -897,10 +892,6 @@ function handleFolderOpen(input){const files=Array.from(input.files);let done=0;
   zone.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});
   zone.addEventListener('drop',e=>{
     e.preventDefault();dragDepth=0;zone.classList.remove('drop-active');
-    const droppedFiles=Array.from(e.dataTransfer.files||[]);
-    if(droppedFiles.length===1&&droppedFiles[0].name.toLowerCase().endsWith('.zip')){
-      const r=new FileReader();r.onload=ev=>importZipFromBuffer(ev.target.result);r.readAsArrayBuffer(droppedFiles[0]);return;
-    }
     const items=Array.from(e.dataTransfer.items||[]);
     const entries=items.map(i=>i.webkitGetAsEntry?i.webkitGetAsEntry():null).filter(Boolean);
     if(!entries.length){
@@ -936,9 +927,6 @@ function handleFolderOpen(input){const files=Array.from(input.files);let done=0;
 function saveFile(){if(!S.activeTab)return;S.files[S.activeTab].content=document.getElementById('editor').value;S.files[S.activeTab].modified=false;addGitChange(S.activeTab,'M');renderTabs();renderTree();tw(`Saved: ${S.activeTab}`,'info');}
 async function saveFileAs(){if(!S.activeTab)return;const n=await askPrompt('Save As',S.activeTab,'File name');if(!n)return;S.files[n]={content:document.getElementById('editor').value,lang:lang(n),modified:false};renderTree();renderTabs();openTab(n);}
 function downloadCurrentFile(){if(!S.activeTab){tw('No file is open to download.','warn');return;}const b=new Blob([document.getElementById('editor').value],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=S.activeTab.split('/').pop();a.click();}
-async function exportProjectZip(){const keys=Object.keys(S.files);if(!keys.length){tw('No files to export.','warn');return;}const zip=new JSZip();keys.forEach(path=>{zip.file(path,S.files[path].content||'');});const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='project.zip';a.click();tw(`Exported ${keys.length} file${keys.length!==1?'s':''} as project.zip`,'info');}
-function handleZipImport(input){const file=input.files[0];if(!file)return;const r=new FileReader();r.onload=e=>importZipFromBuffer(e.target.result);r.readAsArrayBuffer(file);input.value='';}
-async function importZipFromBuffer(buffer){if(typeof JSZip==='undefined'){tw('JSZip not loaded — cannot import ZIP.','warn');return;}const zip=await JSZip.loadAsync(buffer);const entries=Object.values(zip.files).filter(e=>!e.dir);if(!entries.length){tw('ZIP contained no files.','warn');return;}let done=0;entries.forEach(entry=>{entry.async('string').then(content=>{S.files[entry.name]={content,lang:lang(entry.name),modified:false};done++;if(done===entries.length){renderTree();if(entries.length===1)openTab(entries[0].name);else tw(`Imported ${entries.length} file${entries.length!==1?'s':''} from ZIP`,'info');}}).catch(()=>{done++;if(done===entries.length){renderTree();tw(`Imported ${done} file${done!==1?'s':''} from ZIP (some binary files skipped)`,'info');}});});}
 function collapseAll(){Object.keys(ftExpanded).forEach(k=>ftExpanded[k]=false);renderTree();}
 
 // ══ EDITOR ════════════════════════════════════════════════════════════
@@ -1544,7 +1532,7 @@ function loadSampleProject(){
 hydrate();
 
 tw('SprizzleIDE v2.6  |  Mobile View + GitHub + Live Preview + WebLLM + Sliding Context Window');
-tw('ALERT: This is a free-to-use project. All processing takes place in the GPU on your device and all project files are cached on your device's RAM. NONE of your data is ever stored or sent to my personal server. For this reason, any files that are not downloaded to hard storage or pushed to github will be LOST when you close or refresh the page.','err');
+tw('ALERT: This is a free-to-use project. All processing takes place in the RAM on your device. None of your data is ever stored or sent to my server. For this reason, any files that are not downloaded or pushed to github will be lost when you close or refresh the page.','err');
 tw('If you would like to see more interesting projects like this in the future, please consider donating to my Venmo (@Vani-gaji) or my LTC wallet (MDqV1Dkpa6FXVb6ZHmtZVXX93fMbE7dohZ)');
 tw('Type "help" for commands list. Terminal is case sensitive','info');
 
