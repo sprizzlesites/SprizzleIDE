@@ -78,7 +78,8 @@
   .tab:hover .tab-close,.tab.active .tab-close{opacity:.6;}
   .tab-close:hover{opacity:1!important;background:var(--bg-4);}
   .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;}
-  textarea#editor{width:100%;height:100%;background:var(--bg-0);color:var(--text-0);font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:13px;line-height:20px;border:none;outline:none;resize:none;padding:10px 16px;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto;}
+  textarea#editor{width:100%;height:100%;background:var(--bg-0);color:var(--text-0);font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:13px;line-height:20px;border:none;outline:none;resize:none;padding:10px 16px 10px 56px;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto;}
+  #line-gutter{position:absolute;top:0;left:0;bottom:0;width:48px;background:var(--bg-1);border-right:1px solid var(--border);overflow:hidden;font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:13px;line-height:20px;padding-top:10px;box-sizing:border-box;text-align:right;padding-right:8px;color:var(--text-2);user-select:none;pointer-events:none;z-index:2;}
   .panel-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg-2);}
   .panel-tab{padding:6px 14px;cursor:pointer;color:var(--text-2);font-size:12px;border-bottom:2px solid transparent;}
   .panel-tab.active{color:var(--text-0);border-bottom-color:var(--accent);}
@@ -452,6 +453,7 @@
       <div id="editor-area">
         <div id="tabs"></div>
         <div id="editor-wrapper">
+          <div id="line-gutter"></div>
           <div id="welcome" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px;color:var(--text-2);">
             <div style="font-size:48px;color:var(--accent);opacity:.3;"><i class="fa-solid fa-code"></i></div>
             <div style="font-size:22px;color:var(--text-1);font-weight:300;letter-spacing:2px;">SprizzleIDE</div>
@@ -474,7 +476,9 @@
           <textarea id="editor" class="hidden" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
           <div id="search-overlay" style="display:none;position:absolute;top:8px;right:16px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;gap:6px;align-items:center;z-index:50;">
             <input id="search-input" placeholder="Find..." style="background:var(--bg-0);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text-0);font-size:12px;outline:none;width:180px;">
-            <span id="search-count" style="font-size:11px;color:var(--text-2);min-width:40px;"></span>
+            <span id="search-count" style="font-size:11px;color:var(--text-2);min-width:60px;"></span>
+            <span id="search-prev" onclick="searchPrev()" title="Previous match (Shift+Enter)" style="cursor:pointer;color:var(--text-2);padding:2px 5px;font-size:13px;">&#9650;</span>
+            <span id="search-next" onclick="searchNext()" title="Next match (Enter)" style="cursor:pointer;color:var(--text-2);padding:2px 5px;font-size:13px;">&#9660;</span>
             <span onclick="closeSearch()" style="cursor:pointer;color:var(--text-2);padding:2px 4px;">✕</span>
           </div>
         </div>
@@ -872,7 +876,7 @@ function openTab(path){
   ed.classList.remove('hidden');ed.value=S.files[path]?.content||'';
   ed.style.fontSize=S.fontSize+'px';ed.style.whiteSpace=S.wordWrap?'pre-wrap':'pre';
   document.getElementById('file-lang').textContent=lang(path);
-  renderTabs();renderTree();ed.focus();
+  renderTabs();renderTree();ed.focus();renderLineNumbers();
 }
 function closeTab(path){
   const i=S.openTabs.indexOf(path);S.openTabs.splice(i,1);
@@ -950,7 +954,9 @@ function collapseAll(){Object.keys(ftExpanded).forEach(k=>ftExpanded[k]=false);r
 
 // ══ EDITOR ════════════════════════════════════════════════════════════
 const editor=document.getElementById('editor');
-editor.addEventListener('input',()=>{if(S.activeTab){S.files[S.activeTab].modified=true;renderTabs();renderTree();debouncedPersist();}});
+function renderLineNumbers(){const g=document.getElementById('line-gutter');if(!g)return;if(editor.classList.contains('hidden')){g.style.display='none';return;}g.style.display='block';g.style.fontSize=S.fontSize+'px';const count=editor.value.split('\n').length;let h='';for(let i=1;i<=count;i++)h+=`<div>${i}</div>`;g.innerHTML=h;g.scrollTop=editor.scrollTop;}
+editor.addEventListener('scroll',renderLineNumbers);
+editor.addEventListener('input',()=>{if(S.activeTab){S.files[S.activeTab].modified=true;renderTabs();renderTree();debouncedPersist();renderLineNumbers();}});
 let _persistTimer;function debouncedPersist(){clearTimeout(_persistTimer);_persistTimer=setTimeout(persist,2000);}
 editor.addEventListener('keydown',e=>{
   if(e.key==='Tab'){e.preventDefault();const s=editor.selectionStart;editor.value=editor.value.substring(0,s)+'  '+editor.value.substring(editor.selectionEnd);editor.selectionStart=editor.selectionEnd=s+2;if(S.activeTab)S.files[S.activeTab].modified=true;}
@@ -978,10 +984,10 @@ document.addEventListener('mousedown',snapSelIfEditor);
 document.addEventListener('touchstart',snapSelIfEditor,{passive:true});
 function updateCursor(){const v=editor.value.substring(0,editor.selectionStart).split('\n');document.getElementById('cursor-pos').textContent=`Ln ${v.length}, Col ${v[v.length-1].length+1}`;}
 function editorCmd(cmd){editor.focus();document.execCommand(cmd);}
-function changeFontSize(d){S.fontSize=Math.max(8,Math.min(32,S.fontSize+d));editor.style.fontSize=S.fontSize+'px';}
+function changeFontSize(d){S.fontSize=Math.max(8,Math.min(32,S.fontSize+d));editor.style.fontSize=S.fontSize+'px';renderLineNumbers();}
 function toggleWordWrap(){S.wordWrap=!S.wordWrap;editor.style.whiteSpace=S.wordWrap?'pre-wrap':'pre';}
 function toggleIndent(){S.tabSize=S.tabSize===2?4:2;document.getElementById('indent-type').textContent=`Spaces: ${S.tabSize}`;}
-function applySettings(){S.fontSize=parseInt(document.getElementById('set-fontsize').value);editor.style.fontSize=S.fontSize+'px';editor.style.fontFamily=document.getElementById('set-fontfamily').value;editor.style.whiteSpace=document.getElementById('set-wordwrap').value;persist();}
+function applySettings(){S.fontSize=parseInt(document.getElementById('set-fontsize').value);editor.style.fontSize=S.fontSize+'px';editor.style.fontFamily=document.getElementById('set-fontfamily').value;editor.style.whiteSpace=document.getElementById('set-wordwrap').value;persist();renderLineNumbers();}
 function setAccentColor(c){document.documentElement.style.setProperty('--accent',c);const r=parseInt(c.slice(1,3),16),g=parseInt(c.slice(3,5),16),b=parseInt(c.slice(5,7),16);document.documentElement.style.setProperty('--accent-dim',`rgba(${r},${g},${b},0.18)`);persist();}
 
 // ══ LIVE PREVIEW ════════════════════════════════════════════════════════
@@ -1016,10 +1022,14 @@ function popOutPreview(){if(!previewUrl){buildPreview();setTimeout(()=>window.op
 function setPreviewSize(sz){const f=document.getElementById('preview-frame'),w=document.getElementById('preview-frame-wrap');if(sz==='mobile'){f.style.width='375px';f.style.height='667px';w.style.alignItems='center';}else if(sz==='tablet'){f.style.width='768px';f.style.height='100%';w.style.alignItems='stretch';}else{f.style.width='100%';f.style.height='100%';w.style.alignItems='stretch';}}
 
 // ══ SEARCH ════════════════════════════════════════════════════════════
-let searchOn=false;
+let searchOn=false,_searchMatches=[],_searchIdx=0;
 function toggleSearch(){searchOn=!searchOn;const o=document.getElementById('search-overlay');o.style.display=searchOn?'flex':'none';if(searchOn)document.getElementById('search-input').focus();}
-function closeSearch(){searchOn=false;document.getElementById('search-overlay').style.display='none';}
-document.getElementById('search-input').addEventListener('input',e=>{const q=e.target.value;if(!q){document.getElementById('search-count').textContent='';return;}const m=[...editor.value.matchAll(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'))];document.getElementById('search-count').textContent=`${m.length} match${m.length!==1?'es':''}`;});
+function closeSearch(){searchOn=false;_searchMatches=[];_searchIdx=0;document.getElementById('search-overlay').style.display='none';}
+document.getElementById('search-input').addEventListener('input',e=>{const q=e.target.value;_searchMatches=[];_searchIdx=0;if(!q){document.getElementById('search-count').textContent='';return;}_searchMatches=[...editor.value.matchAll(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'))];if(_searchMatches.length)scrollToMatch();else document.getElementById('search-count').textContent='No matches';});
+document.getElementById('search-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.shiftKey?searchPrev():searchNext();}if(e.key==='Escape')closeSearch();});
+function searchNext(){if(!_searchMatches.length)return;_searchIdx=(_searchIdx+1)%_searchMatches.length;scrollToMatch();}
+function searchPrev(){if(!_searchMatches.length)return;_searchIdx=(_searchIdx-1+_searchMatches.length)%_searchMatches.length;scrollToMatch();}
+function scrollToMatch(){const m=_searchMatches[_searchIdx];if(!m)return;editor.focus();editor.selectionStart=m.index;editor.selectionEnd=m.index+m[0].length;const linesBefore=editor.value.substring(0,m.index).split('\n').length-1;editor.scrollTop=Math.max(0,linesBefore*20+10-editor.clientHeight/2);document.getElementById('search-count').textContent=`${_searchIdx+1} of ${_searchMatches.length}`;}
 function globalSearch(q){const r=document.getElementById('search-results');if(!q){r.innerHTML='';return;}let h='';Object.entries(S.files).forEach(([path,file])=>{const lines=file.content.split('\n');const ms=[];lines.forEach((line,i)=>{if(line.toLowerCase().includes(q.toLowerCase())){const hi=line.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),m=>`<mark>${m}</mark>`);ms.push({n:i+1,t:hi});}});if(ms.length){h+=`<div class="search-result-file">${path} (${ms.length})</div>`;ms.slice(0,5).forEach(m=>{h+=`<div class="search-result-line" onclick="openTab('${path}')"><span class="search-result-num">${m.n}</span><span style="font-size:12px;">${m.t}</span></div>`;});}});r.innerHTML=h||'<div style="color:var(--text-2);font-size:12px;padding:8px;">No results</div>';}
 
 // ══ TERMINAL ════════════════════════════════════════════════════════════
