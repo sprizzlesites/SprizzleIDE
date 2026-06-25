@@ -86,6 +86,8 @@ button{font-family:inherit;color:inherit}
 .h.sw{left:-5px;bottom:-5px;cursor:nesw-resize}.h.se{right:-5px;bottom:-5px;cursor:nwse-resize}
 .h.n{left:50%;top:-5px;margin-left:-4px;cursor:ns-resize}.h.s{left:50%;bottom:-5px;margin-left:-4px;cursor:ns-resize}
 .h.w{left:-5px;top:50%;margin-top:-4px;cursor:ew-resize}.h.e{right:-5px;top:50%;margin-top:-4px;cursor:ew-resize}
+.canvaswrap.cur-edit .overlay{cursor:text}
+.canvaswrap.cur-cross .overlay{cursor:crosshair}
 .marquee{position:absolute;border:1px solid var(--accent);background:var(--accent-dim);pointer-events:none;z-index:6}
 .reticle-x,.reticle-y{position:absolute;background:var(--accent-line);pointer-events:none;z-index:4}
 .reticle-x{height:1px;left:0;right:0}.reticle-y{width:1px;top:0;bottom:0}
@@ -186,6 +188,7 @@ button{font-family:inherit;color:inherit}
     <!-- tool dock -->
     <div class="dock" id="dock">
       <div class="tool on" data-tool="select"><svg viewBox="0 0 24 24"><path d="M5 3l6 16 2-6 6-2z"/></svg><span class="tip">Select / move<b>V</b></span></div>
+      <div class="tool" data-tool="edit"><svg viewBox="0 0 24 24"><path d="M8 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h2M16 4h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-2M12 4v16"/></svg><span class="tip">Edit existing text<b>E</b></span></div>
       <div class="dockdiv"></div>
       <div class="tool" data-tool="text"><svg viewBox="0 0 24 24"><path d="M4 6h16M9 6v12M15 6v12M7 18h4M13 18h4"/></svg><span class="tip">Text<b>T</b></span></div>
       <div class="tool" data-tool="white"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg><span class="tip">Whiteout / cover<b>W</b></span></div>
@@ -227,12 +230,13 @@ button{font-family:inherit;color:inherit}
     <p>Most browser PDF editors rasterize each page to an image, then re-encode the whole file on save. That's where your fonts get swapped for substitutes, boxes shift a few points, and crisp vector text turns fuzzy.</p>
     <p>Reticle never touches your existing page content. It reads the original PDF object graph and copies your pages through unchanged. Anything you add — text, whiteout, images, signatures — is appended as a new content layer over the top. The bytes of your template survive.</p>
     <h3>What it does well</h3>
-    <p>Filling templates and forms, redacting/whiting-out, stamping signatures and logos, adding boxes and highlights, page reordering / rotation / deletion / blank inserts, and merging PDFs. Geometry is tracked in PDF points so placement is exact and re-applies cleanly to the same template.</p>
-    <h3>The one honest limit</h3>
-    <p>It does not re-type your existing body text in place. No browser tool does that cleanly — PDFs store positioned glyphs, not editable paragraphs, so "editing" existing text means deleting glyphs and re-typesetting, which is exactly what produces the font-substitution artifacts you're avoiding. The correct move on a template is whiteout the old value, then drop new text on top. That's lossless.</p>
+    <p>Editing text already in the document (click to retype), filling templates and forms, redacting/whiting-out, stamping signatures and logos, adding boxes and highlights, page reordering / rotation / deletion / blank inserts, and merging PDFs. Geometry is tracked in PDF points so placement is exact and re-applies cleanly to the same template.</p>
+    <h3>Editing text already in the PDF</h3>
+    <p>Select the Edit-text tool (E) and click any text. Reticle reads that text run straight from the PDF — its string, position, size and font — covers it with a patch colour-matched to the page background, and drops an editable copy in the exact same place with the font, size and colour matched. You retype; on export it reads as if you edited the original.</p>
+    <p>This is the honest browser-feasible version of in-place editing. PDFs store positioned glyphs, not paragraphs, so nothing can truly re-flow original text without re-typesetting it (which is what swaps fonts in other tools). Reticle instead reuses your typed value and never disturbs the surrounding content. Two things to know: it works one text run at a time (often a word or line), and the font is matched to the closest base font — if the match looks off, change it in the panel or embed the real font.</p>
     <h3>Keyboard</h3>
     <div class="shortcuts">
-      <span class="kbd">V T W R H P I S</span><span>pick tool</span>
+      <span class="kbd">V E T W R H P I S</span><span>pick tool</span>
       <span class="kbd">⌘/Ctrl Z</span><span>undo · add ⇧ to redo</span>
       <span class="kbd">⌫ / Del</span><span>delete selected</span>
       <span class="kbd">Arrows</span><span>nudge 1pt · ⇧ = 10pt</span>
@@ -302,6 +306,8 @@ const S = {
   customFont:null,     // {bytes,name}
   fontkit:null,
   history:[], hptr:-1,
+  textRuns:{},         // pageId -> [extracted existing-text runs]
+  _hintShown:false,
   _uid:0,
 };
 const uid = p => (p||"a")+(++S._uid).toString(36)+Date.now().toString(36).slice(-3);
@@ -348,7 +354,8 @@ async function openPDF(file){
     await renderAll();
     pushHistory(true);
     selectAnn(null,null);
-    toast(`Opened ${S.pages.length} page${S.pages.length>1?"s":""}`);
+    setTool("edit");
+    toast(`Opened ${S.pages.length} page${S.pages.length>1?"s":""} — click any text to edit it`);
   }catch(e){ console.error(e); toast("Couldn't read that PDF",true); }
   busy(false);
 }
@@ -397,6 +404,8 @@ async function renderPage(i){
       const page=await src.pdfjs.getPage(p.idx+1);
       const vp=page.getViewport({scale:S.scale*DPR, rotation:p.rot});
       await page.render({canvasContext:ctx, viewport:vp}).promise;
+      const cache=S.textRuns[p.id];
+      if(!cache || cache._rot!==p.rot){ S.textRuns[p.id]=await extractRuns(page,p); }
     }catch(e){ ctx.fillStyle="#fff"; ctx.fillRect(0,0,cv.width,cv.height); }
   }
   paintOverlay(i);
@@ -496,6 +505,82 @@ function renderThumbs(){
 function gotoPage(i){ const el=wrap.children[i]; if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); }
 
 /* ============================================================= *
+ *  EXISTING-TEXT EDITING  (read run -> cover -> editable copy)
+ * ============================================================= */
+async function extractRuns(page,p){
+  const out=[]; out._rot=p.rot;
+  try{
+    const vp1=page.getViewport({scale:1,rotation:p.rot});
+    const tc=await page.getTextContent();
+    for(const it of tc.items){
+      if(!it.str || !it.str.trim()) continue;
+      const m=pdfjsLib.Util.transform(vp1.transform,it.transform);
+      const p0={x:m[4],y:m[5]};
+      const p1={x:m[0]*it.width+m[4], y:m[1]*it.width+m[5]};
+      let fs=Math.hypot(m[2],m[3]); if(!fs||fs<1) fs=Math.hypot(m[0],m[1])||12;
+      const len=Math.hypot(p1.x-p0.x,p1.y-p0.y)||fs*0.5;
+      const dir={x:(p1.x-p0.x)/len,y:(p1.y-p0.y)/len};
+      const up={x:dir.y,y:-dir.x};                 // screen-up perpendicular
+      const asc=fs*0.80, desc=fs*0.28;
+      const cs=[ {x:p0.x+up.x*asc,y:p0.y+up.y*asc}, {x:p1.x+up.x*asc,y:p1.y+up.y*asc},
+                 {x:p1.x-up.x*desc,y:p1.y-up.y*desc}, {x:p0.x-up.x*desc,y:p0.y-up.y*desc} ];
+      const xs=cs.map(c=>c.x), ys=cs.map(c=>c.y);
+      const bx=Math.min(...xs), by=Math.min(...ys), bw=Math.max(...xs)-Math.min(...xs), bh=Math.max(...ys)-Math.min(...ys);
+      const style=(tc.styles&&tc.styles[it.fontName])||{};
+      out.push({ str:it.str, baseX:p0.x, baseY:p0.y, size:fs,
+        box:{x:bx,y:by,w:Math.max(bw,fs*0.4),h:Math.max(bh,fs*0.6)},
+        fam:matchFam(style.fontFamily,it.fontName),
+        bold:/bold|black|heavy|semibold|demi/i.test(it.fontName||""),
+        italic:/italic|oblique/i.test(it.fontName||"") });
+    }
+  }catch(e){ /* some PDFs expose no text layer */ }
+  return out;
+}
+function matchFam(fam,name){
+  const s=((fam||"")+" "+(name||"")).toLowerCase();
+  if(/courier|mono|consol/.test(s)) return "Courier";
+  if(/(times|serif|georgia|roman|minion|garamond|cambria|book antiqua)/.test(s) && !/sans/.test(s)) return "Times";
+  return "Helvetica";
+}
+function sampleColors(i,box){
+  const def={bg:{r:1,g:1,b:1},fg:{r:0,g:0,b:0}};
+  const cv=wrap.children[i]?.querySelector("canvas.pg"); if(!cv) return def;
+  const k=S.scale*DPR;
+  let x=Math.max(0,Math.floor((box.x-1)*k)), y=Math.max(0,Math.floor((box.y-1)*k));
+  let w=Math.min(cv.width-x,Math.ceil((box.w+2)*k)), h=Math.min(cv.height-y,Math.ceil((box.h+2)*k));
+  if(w<1||h<1) return def;
+  let data; try{ data=cv.getContext("2d").getImageData(x,y,w,h).data; }catch(e){ return def; }
+  let lum=p=>0.299*p[0]+0.587*p[1]+0.114*p[2];
+  let bgP=null,fgP=null,bgL=-1,fgL=256;
+  for(let q=0;q<data.length;q+=4){
+    const px=[data[q],data[q+1],data[q+2]]; const L=lum(px);
+    if(L>bgL){bgL=L;bgP=px;} if(L<fgL){fgL=L;fgP=px;}
+  }
+  if(!bgP||!fgP) return def;
+  return { bg:{r:bgP[0]/255,g:bgP[1]/255,b:bgP[2]/255}, fg:{r:fgP[0]/255,g:fgP[1]/255,b:fgP[2]/255} };
+}
+function editExistingAt(i,mx,my){
+  const p=S.pages[i]; const runs=S.textRuns[p.id]||[];
+  let hit=null;
+  for(let k=runs.length-1;k>=0;k--){ const b=runs[k].box;
+    if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){ hit=runs[k]; break; } }
+  if(!hit) return false;
+  const {bg,fg}=sampleColors(i,hit.box);
+  const pad=Math.max(0.5,hit.size*0.06);
+  const cover={id:uid("w"),type:"white",x:hit.box.x-pad,y:hit.box.y-pad,w:hit.box.w+pad*2,h:hit.box.h+pad*2,color:bg};
+  const sz=Math.round(hit.size*10)/10;
+  const txt={id:uid("t"),type:"text",x:hit.baseX,y:hit.baseY-sz*0.80,
+    w:Math.max(hit.box.w+sz*0.8,24),h:sz*1.2,text:hit.str,size:sz,
+    font:hit.fam,bold:hit.bold,italic:hit.italic,color:fg,align:"left"};
+  S.ann[p.id].push(cover); S.ann[p.id].push(txt);
+  paintOverlay(i); selectAnn(i,txt.id);
+  const el=wrap.children[i].querySelector(`.ann[data-id="${txt.id}"]`);
+  if(el) startEdit(p,txt,el,true);
+  pushHistory();
+  return true;
+}
+
+/* ============================================================= *
  *  PAGE OPS
  * ============================================================= */
 async function pageOp(i,act){
@@ -518,6 +603,8 @@ function setTool(t){
   S.tool=t;
   [...dock.querySelectorAll(".tool")].forEach(el=>el.classList.toggle("on",el.dataset.tool===t));
   stage.classList.toggle("grab",false);
+  wrap.classList.toggle("cur-edit",t==="edit");
+  wrap.classList.toggle("cur-cross",["white","box","hl","pen","text"].includes(t));
   if(t==="image"){ $("imgInput").click(); setTool("select"); return; }
   if(t==="signature"){ openSig(); setTool("select"); return; }
 }
@@ -533,11 +620,23 @@ function onDown(e,i,ov){
   if(panning){ return; }
   const p=S.pages[i]; const hit=e.target.closest(".ann"); const handle=e.target.closest(".h");
   const m=pt(e,ov);
+  if(S.tool==="edit"){
+    if(handle && hit){ e.preventDefault(); startResize(i,hit.dataset.id,handle.dataset.h,m); return; }
+    if(hit){ e.preventDefault(); selectAnn(i,hit.dataset.id); const a=getAnn(i,hit.dataset.id);
+      if(a.type==="text"){ const el=wrap.children[i].querySelector(`.ann[data-id="${a.id}"]`); if(el){ startEdit(p,a,el,false); return; } }
+      startMove(i,a,m); return; }
+    e.preventDefault(); if(!editExistingAt(i,m.x,m.y)){ selectAnn(null,null);
+      toast("No selectable text there — try the Text tool to add new text"); }
+    return;
+  }
   if(S.tool==="select"){
     if(handle && hit){ e.preventDefault(); startResize(i,hit.dataset.id,handle.dataset.h,m); return; }
     if(hit){ e.preventDefault(); selectAnn(i,hit.dataset.id);
       const a=getAnn(i,hit.dataset.id); startMove(i,a,m); return; }
-    selectAnn(null,null); // click empty
+    selectAnn(null,null);
+    // discoverability: clicked bare PDF text while in Select mode
+    if(overRun(i,m) && !S._hintShown){ S._hintShown=true;
+      toast("To change text already in the PDF, use the Edit-text tool (press E)"); }
     return;
   }
   // creation tools
@@ -546,6 +645,8 @@ function onDown(e,i,ov){
   if(S.tool==="pen"){ startPen(i,ov,m); return; }
   startCreateRect(i,ov,m); // white/box/hl
 }
+function overRun(i,m){ const p=S.pages[i]; const runs=S.textRuns[p.id]||[];
+  return runs.some(r=>m.x>=r.box.x&&m.x<=r.box.x+r.box.w&&m.y>=r.box.y&&m.y<=r.box.y+r.box.h); }
 
 /* --- create rect-like --- */
 function startCreateRect(i,ov,m){
@@ -677,13 +778,17 @@ function typeName(t){ return ({text:"Text",white:"Whiteout",box:"Box",hl:"Highli
 function emptyInspector(){
   const loaded=S.pages.length>0;
   if(!loaded) return `<div class="sec"><div class="lab">No document</div><div class="emptools">Open a PDF to begin. Everything happens locally in your browser.</div></div>`;
-  return `<div class="sec"><div class="lab">Tools</div>
+  return `<div class="sec"><div class="lab">Edit existing text</div>
     <div class="emptools">
-      <p style="margin:0 0 10px"><b>Nothing selected.</b> Pick a tool from the dock, or click an object to edit it.</p>
-      <p style="margin:0 0 6px"><b>T</b> Text — click to place, type, style</p>
-      <p style="margin:0 0 6px"><b>W</b> Whiteout — cover a value before retyping</p>
-      <p style="margin:0 0 6px"><b>R</b> Box · <b>H</b> Highlight · <b>P</b> Pen</p>
+      <p style="margin:0 0 8px">Pick the <b>Edit-text</b> tool <span class="kbd">E</span> (on by default) and <b>click any text in the PDF</b>. It's covered with a matched patch and replaced by an editable copy in the same spot, with the font, size and color matched. Retype and export.</p>
+      <p style="margin:0;color:var(--faint);font-size:11px">Works per text run, so you may click a word or a line at a time. Font is matched to the closest base font — switch it in the panel if needed.</p>
+    </div></div>
+    <div class="sec"><div class="lab">Add new</div>
+    <div class="emptools">
+      <p style="margin:0 0 6px"><b>T</b> Text · <b>W</b> Whiteout · <b>R</b> Box</p>
+      <p style="margin:0 0 6px"><b>H</b> Highlight · <b>P</b> Pen markup</p>
       <p style="margin:0 0 6px"><b>I</b> Image · <b>S</b> Signature</p>
+      <p style="margin:0;color:var(--faint);font-size:11px"><b>V</b> select / move objects you've added</p>
     </div></div>
     <div class="sec"><div class="lab">Fonts</div>
       <div class="note" style="margin-bottom:8px">New text uses the standard PDF base fonts (Helvetica, Times, Courier) — real embedded fonts, no substitution. Your template's own fonts are never altered.</div>
@@ -1061,7 +1166,7 @@ window.addEventListener("drop",e=>{ if(!empty.classList.contains("hidden")){ e.p
   const f=e.dataTransfer.files[0]; if(f&&/pdf$/i.test(f.name)) openPDF(f); } });
 
 /* keyboard */
-const TOOLKEYS={v:"select",t:"text",w:"white",r:"box",h:"hl",p:"pen",i:"image",s:"signature"};
+const TOOLKEYS={v:"select",e:"edit",t:"text",w:"white",r:"box",h:"hl",p:"pen",i:"image",s:"signature"};
 window.addEventListener("keydown",e=>{
   const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)||document.activeElement.isContentEditable;
   if(e.code==="Space"&&!typing){ panning=true; stage.classList.add("grab"); }
