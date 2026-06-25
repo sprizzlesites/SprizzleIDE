@@ -547,10 +547,11 @@ function sampleColors(i,box){
   const cv=wrap.children[i]?.querySelector("canvas.pg"); if(!cv) return def;
   const k=S.scale*DPR;
   let x=Math.max(0,Math.floor((box.x-1)*k)), y=Math.max(0,Math.floor((box.y-1)*k));
-  let w=Math.min(cv.width-x,Math.ceil((box.w+2)*k)), h=Math.min(cv.height-y,Math.ceil((box.h+2)*k));
-  if(w<1||h<1) return def;
+  let w=Math.min(cv.width-x,Math.max(1,Math.ceil((box.w+2)*k)));
+  let h=Math.min(cv.height-y,Math.max(1,Math.ceil((box.h+2)*k)));
+  if(w<1||h<1||x>=cv.width||y>=cv.height) return def;
   let data; try{ data=cv.getContext("2d").getImageData(x,y,w,h).data; }catch(e){ return def; }
-  let lum=p=>0.299*p[0]+0.587*p[1]+0.114*p[2];
+  const lum=p=>0.299*p[0]+0.587*p[1]+0.114*p[2];
   let bgP=null,fgP=null,bgL=-1,fgL=256;
   for(let q=0;q<data.length;q+=4){
     const px=[data[q],data[q+1],data[q+2]]; const L=lum(px);
@@ -561,21 +562,101 @@ function sampleColors(i,box){
 }
 function editExistingAt(i,mx,my){
   const p=S.pages[i]; const runs=S.textRuns[p.id]||[];
-  let hit=null;
-  for(let k=runs.length-1;k>=0;k--){ const b=runs[k].box;
-    if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){ hit=runs[k]; break; } }
-  if(!hit) return false;
-  const {bg,fg}=sampleColors(i,hit.box);
-  const pad=Math.max(0.5,hit.size*0.06);
-  const cover={id:uid("w"),type:"white",x:hit.box.x-pad,y:hit.box.y-pad,w:hit.box.w+pad*2,h:hit.box.h+pad*2,color:bg};
-  const sz=Math.round(hit.size*10)/10;
-  const txt={id:uid("t"),type:"text",x:hit.baseX,y:hit.baseY-sz*0.80,
-    w:Math.max(hit.box.w+sz*0.8,24),h:sz*1.2,text:hit.str,size:sz,
-    font:hit.fam,bold:hit.bold,italic:hit.italic,color:fg,align:"left"};
+
+  // --- 1. Try extracted text runs first (expaned 6pt radius) ---
+  let hit=null, bestDist=Infinity;
+  for(let k=runs.length-1;k>=0;k--){
+    const b=runs[k].box;
+    const PAD=6;
+    if(mx>=b.x-PAD && mx<=b.x+b.w+PAD && my>=b.y-PAD && my<=b.y+b.h+PAD){
+      const cx=b.x+b.w/2, cy=b.y+b.h/2;
+      const d=Math.hypot(mx-cx,my-cy);
+      if(d<bestDist){ bestDist=d; hit=runs[k]; }
+    }
+  }
+  if(hit){
+    const {bg,fg}=sampleColors(i,hit.box);
+    const pad=Math.max(0.5,hit.size*0.06);
+    const cover={id:uid("w"),type:"white",x:hit.box.x-pad,y:hit.box.y-pad,w:hit.box.w+pad*2,h:hit.box.h+pad*2,color:bg};
+    const sz=Math.round(hit.size*10)/10;
+    const txt={id:uid("t"),type:"text",x:hit.baseX,y:hit.baseY-sz*0.80,
+      w:Math.max(hit.box.w+sz*0.8,24),h:sz*1.2,text:hit.str,size:sz,
+      font:hit.fam,bold:hit.bold,italic:hit.italic,color:fg,align:"left"};
+    S.ann[p.id].push(cover); S.ann[p.id].push(txt);
+    paintOverlay(i); selectAnn(i,txt.id);
+    const el=wrap.children[i].querySelector(`.ann[data-id="${txt.id}"]`);
+    if(el) startEdit(p,txt,el,true);
+    pushHistory();
+    return true;
+  }
+
+  // --- 2. Visual fallback: pixel-scan to estimate line height + colors ---
+  //   Works for outlined text, non-unicode fonts, anything pdf.js can't parse.
+  const cv=wrap.children[i]?.querySelector("canvas.pg"); if(!cv) return false;
+  const k=S.scale*DPR; const d=dispSize(p);
+  // pixel coords of click
+  const px=Math.round(mx*k), py=Math.round(my*k);
+  if(px<0||py<0||px>=cv.width||py>=cv.height) return false;
+  const ctx=cv.getContext("2d");
+
+  // sample a wide horizontal strip at click y to get bg color + detect dark content
+  const SCAN_W=Math.min(cv.width, Math.round(120*k)), SCAN_H=Math.min(cv.height, Math.round(60*k));
+  const sx=Math.max(0,px-SCAN_W/2|0), sy=Math.max(0,py-SCAN_H/2|0);
+  const sw=Math.min(cv.width-sx,SCAN_W), sh=Math.min(cv.height-sy,SCAN_H);
+  let idata; try{ idata=ctx.getImageData(sx,sy,sw,sh).data; }catch(e){ return false; }
+  const lum=([r,g,b])=>0.299*r+0.587*g+0.114*b;
+  let bgRGB=[255,255,255], fgRGB=[0,0,0], bgL=-1, fgL=999;
+  for(let q=0;q<idata.length;q+=4){
+    const pix=[idata[q],idata[q+1],idata[q+2]]; const L=lum(pix);
+    if(L>bgL){bgL=L;bgRGB=pix;} if(L<fgL){fgL=L;fgRGB=pix;}
+  }
+
+  // scan vertically from click point to find dark pixel extent → line height estimate
+  const DARK_THRESH=bgL*0.65;
+  const stripX=Math.max(0,Math.min(cv.width-2,px-1));
+  let top=py, bot=py;
+  for(let y=py;y>=Math.max(0,py-Math.round(60*k));y--){
+    const off=(y*cv.width+stripX)*4; const L2=lum([idata[(y-sy)*sw*4+(px-sx)*4]||bgRGB[0], idata[(y-sy)*sw*4+(px-sx)*4+1]||bgRGB[1], idata[(y-sy)*sw*4+(px-sx)*4+2]||bgRGB[2]]);
+    if(L2<DARK_THRESH) top=y; else if(py-y>Math.round(4*k)) break;
+  }
+  for(let y=py;y<=Math.min(cv.height-1,py+Math.round(60*k));y++){
+    const off=((y-sy)*sw+(px-sx))*4;
+    if(off>=0&&off<idata.length){ const L2=lum([idata[off],idata[off+1],idata[off+2]]);
+      if(L2<DARK_THRESH) bot=y; else if(y-py>Math.round(4*k)) break; }
+  }
+  // convert pixel extent → PDF points
+  let linePx=Math.max(bot-top,Math.round(8*k)); const lineH=linePx/k;
+  const estSize=Math.max(6,Math.round(lineH*0.72*10)/10); // approx font size from line height
+
+  // scan horizontally from click to find text run width
+  let left2=px, right2=px;
+  const midY=Math.round((top+bot)/2);
+  for(let x=px;x>=Math.max(0,px-Math.round(250*k));x--){
+    const off=((midY-sy)*sw+(x-sx))*4;
+    if(off>=0&&off<idata.length&&lum([idata[off],idata[off+1],idata[off+2]])<DARK_THRESH) left2=x;
+    else if(px-x>Math.round(3*k)) break;
+  }
+  for(let x=px;x<=Math.min(cv.width-1,px+Math.round(250*k));x++){
+    const off=((midY-sy)*sw+(x-sx))*4;
+    if(off>=0&&off<idata.length&&lum([idata[off],idata[off+1],idata[off+2]])<DARK_THRESH) right2=x;
+    else if(x-px>Math.round(3*k)) break;
+  }
+  const runW=Math.max((right2-left2)/k, estSize*1.5);
+
+  // build pt coords (display y-down)
+  const ptX=left2/k, ptY=top/k;
+  const bg={r:bgRGB[0]/255,g:bgRGB[1]/255,b:bgRGB[2]/255};
+  const fg={r:fgRGB[0]/255,g:fgRGB[1]/255,b:fgRGB[2]/255};
+
+  const cvPad=Math.max(1,estSize*0.08);
+  const cover={id:uid("w"),type:"white",x:ptX-cvPad,y:ptY-cvPad,w:runW+cvPad*2,h:lineH+cvPad*2,color:bg};
+  const txt={id:uid("t"),type:"text",x:ptX,y:ptY,w:Math.max(runW+estSize,40),h:estSize*1.4,
+    text:"",size:estSize,font:"Helvetica",bold:false,italic:false,color:fg,align:"left"};
+
   S.ann[p.id].push(cover); S.ann[p.id].push(txt);
   paintOverlay(i); selectAnn(i,txt.id);
   const el=wrap.children[i].querySelector(`.ann[data-id="${txt.id}"]`);
-  if(el) startEdit(p,txt,el,true);
+  if(el) startEdit(p,txt,el,false);
   pushHistory();
   return true;
 }
@@ -613,7 +694,24 @@ dock.addEventListener("click",e=>{ const el=e.target.closest(".tool"); if(el) se
 let drag=null;   // active drag/create/resize
 function attachOverlayEvents(i,ov){
   ov.addEventListener("mousedown",e=>onDown(e,i,ov));
+  ov.addEventListener("mousemove",e=>onHover(e,i,ov));
+  ov.addEventListener("mouseleave",()=>clearHover(i));
 }
+function onHover(e,i,ov){
+  if(S.tool!=="edit"||drag) return;
+  const m=pt(e,ov); const p=S.pages[i]; const runs=S.textRuns[p.id]||[];
+  let found=null;
+  for(let k=runs.length-1;k>=0;k--){
+    const b=runs[k].box, PAD=4;
+    if(m.x>=b.x-PAD&&m.x<=b.x+b.w+PAD&&m.y>=b.y-PAD&&m.y<=b.y+b.h+PAD){ found=runs[k]; break; }
+  }
+  let hl=ov.querySelector(".run-hl");
+  if(found){
+    if(!hl){ hl=document.createElement("div"); hl.className="run-hl"; ov.appendChild(hl); }
+    hl.style.cssText=`position:absolute;pointer-events:none;border:1px solid var(--accent);background:rgba(78,161,255,.10);border-radius:2px;left:${found.box.x*S.scale}px;top:${found.box.y*S.scale}px;width:${found.box.w*S.scale}px;height:${found.box.h*S.scale}px;`;
+  } else { if(hl) hl.remove(); }
+}
+function clearHover(i){ const ov=wrap.children[i]?.querySelector(".overlay"); if(ov) ov.querySelector(".run-hl")?.remove(); }
 function pt(e,ov){ const r=ov.getBoundingClientRect(); return {x:(e.clientX-r.left)/S.scale, y:(e.clientY-r.top)/S.scale}; }
 
 function onDown(e,i,ov){
@@ -625,8 +723,7 @@ function onDown(e,i,ov){
     if(hit){ e.preventDefault(); selectAnn(i,hit.dataset.id); const a=getAnn(i,hit.dataset.id);
       if(a.type==="text"){ const el=wrap.children[i].querySelector(`.ann[data-id="${a.id}"]`); if(el){ startEdit(p,a,el,false); return; } }
       startMove(i,a,m); return; }
-    e.preventDefault(); if(!editExistingAt(i,m.x,m.y)){ selectAnn(null,null);
-      toast("No selectable text there — try the Text tool to add new text"); }
+    e.preventDefault(); editExistingAt(i,m.x,m.y);
     return;
   }
   if(S.tool==="select"){
@@ -780,8 +877,9 @@ function emptyInspector(){
   if(!loaded) return `<div class="sec"><div class="lab">No document</div><div class="emptools">Open a PDF to begin. Everything happens locally in your browser.</div></div>`;
   return `<div class="sec"><div class="lab">Edit existing text</div>
     <div class="emptools">
-      <p style="margin:0 0 8px">Pick the <b>Edit-text</b> tool <span class="kbd">E</span> (on by default) and <b>click any text in the PDF</b>. It's covered with a matched patch and replaced by an editable copy in the same spot, with the font, size and color matched. Retype and export.</p>
-      <p style="margin:0;color:var(--faint);font-size:11px">Works per text run, so you may click a word or a line at a time. Font is matched to the closest base font — switch it in the panel if needed.</p>
+      <p style="margin:0 0 8px">Pick the <b>Edit-text</b> tool <span class="kbd">E</span> (on by default) and <b>click anywhere on the page</b> — on text, a label, a field value, anywhere.</p>
+      <p style="margin:0 0 8px">If the PDF has a parseable text layer, Reticle reads the run and pre-fills it. If not (outlined fonts, InDesign/Illustrator exports, scanned templates) it scans the pixels at your click point to estimate the line height and colors, covers the original with a matched patch, and drops a blank text box. Type your value and export.</p>
+      <p style="margin:0;color:var(--faint);font-size:11px">Blue outline on hover = parseable text run. Clicking anywhere else uses the pixel fallback — it always works.</p>
     </div></div>
     <div class="sec"><div class="lab">Add new</div>
     <div class="emptools">
