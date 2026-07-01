@@ -80,7 +80,10 @@
   .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;}
   textarea#editor{width:100%;height:100%;background:var(--bg-0);color:var(--text-0);font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:13px;line-height:20px;border:none;outline:none;resize:none;padding:10px 16px 10px 56px;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto;}
   #line-gutter{display:none;position:absolute;top:0;left:0;bottom:0;width:48px;background:var(--bg-1);border-right:1px solid var(--border);overflow:hidden;font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:13px;line-height:20px;padding-top:10px;box-sizing:border-box;text-align:right;padding-right:8px;color:var(--text-2);user-select:none;pointer-events:none;z-index:2;}
-  #search-hl-overlay{display:none;position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:13px;line-height:20px;padding:10px 16px 10px 56px;white-space:pre;overflow:hidden;box-sizing:border-box;z-index:3;color:transparent;word-break:normal;}
+  /* Search highlight overlay: font metrics, size and padding are mirrored
+     from the textarea's computed style by renderSearchHighlight() so CSS
+     overrides (like the mobile 16px input rule) can never desync them. */
+  #search-hl-overlay{display:none;position:absolute;top:0;left:0;pointer-events:none;overflow:hidden;box-sizing:border-box;z-index:3;color:transparent;padding:0;}
   .srch-match{color:var(--green);background:rgba(80,200,80,0.15);border-radius:2px;}
   .srch-current{color:#4dff91;background:rgba(77,255,145,0.28);border-radius:2px;box-shadow:0 0 0 1px rgba(77,255,145,0.55);}
   .panel-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg-2);}
@@ -1047,8 +1050,56 @@ function collapseAll(){Object.keys(ftExpanded).forEach(k=>ftExpanded[k]=false);r
 // ══ EDITOR ════════════════════════════════════════════════════════════
 const editor=document.getElementById('editor');
 function renderLineNumbers(){const g=document.getElementById('line-gutter');if(!g)return;if(editor.classList.contains('hidden')){g.style.display='none';return;}g.style.display='block';g.style.fontSize=S.fontSize+'px';const count=editor.value.split('\n').length;let h='';for(let i=1;i<=count;i++)h+=`<div>${i}</div>`;g.innerHTML=h;g.scrollTop=editor.scrollTop;}
-function renderSearchHighlight(){const ov=document.getElementById('search-hl-overlay');if(!ov)return;if(!searchOn||!_searchMatches.length){ov.style.display='none';return;}ov.style.display='block';ov.style.fontSize=S.fontSize+'px';ov.style.fontFamily=editor.style.fontFamily||"'Cascadia Code','Consolas','Courier New',monospace";ov.style.whiteSpace=editor.style.whiteSpace||'pre';ov.style.tabSize=String(S.tabSize);const t=editor.value;const eh=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');let h='',l=0;_searchMatches.forEach((m,i)=>{h+=eh(t.substring(l,m.index));h+=`<span class="${i===_searchIdx?'srch-current':'srch-match'}">${eh(m[0])}</span>`;l=m.index+m[0].length;});h+=eh(t.substring(l));ov.innerHTML=h;ov.scrollTop=editor.scrollTop;ov.scrollLeft=editor.scrollLeft;}
-editor.addEventListener('scroll',()=>{renderLineNumbers();const ov=document.getElementById('search-hl-overlay');if(ov&&ov.style.display!=='none'){ov.scrollTop=editor.scrollTop;ov.scrollLeft=editor.scrollLeft;}});
+// ── search highlight overlay ──
+// Mirrors the textarea's computed metrics and renders ONLY the visible
+// lines (virtualized, positioned by transform) instead of re-escaping the
+// whole file into innerHTML on every keystroke/scroll.
+const _hlEsc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function _hlLineOffset(t,line){let idx=0;for(let i=0;i<line;i++){const n=t.indexOf('\n',idx);if(n<0)return t.length;idx=n+1;}return idx;}
+function _hlBuild(t,a,b){
+  // highlighted HTML for t[a..b) using matches that intersect the slice
+  let h='',pos=a;
+  for(let i=0;i<_searchMatches.length;i++){
+    const m=_searchMatches[i],s=m.index,e=s+m[0].length;
+    if(e<=a)continue;if(s>=b)break;
+    const cs=Math.max(s,a),ce=Math.min(e,b);
+    h+=_hlEsc(t.substring(pos,cs));
+    h+=`<span class="${i===_searchIdx?'srch-current':'srch-match'}">${_hlEsc(t.substring(cs,ce))}</span>`;
+    pos=ce;
+  }
+  return h+_hlEsc(t.substring(pos,b));
+}
+function renderSearchHighlight(){
+  const ov=document.getElementById('search-hl-overlay');if(!ov)return;
+  if(!searchOn||!_searchMatches.length){ov.style.display='none';ov.innerHTML='';return;}
+  const cs=getComputedStyle(editor);
+  // mirror the textarea's real (computed) metrics — immune to !important CSS
+  ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','tabSize','whiteSpace','wordBreak','overflowWrap'].forEach(p=>{ov.style[p]=cs[p];});
+  ov.style.display='block';
+  ov.style.width=editor.clientWidth+'px';   // clientWidth excludes the scrollbar
+  ov.style.height=editor.clientHeight+'px';
+  const lh=parseFloat(cs.lineHeight)||20,padTop=parseFloat(cs.paddingTop)||0,padLeft=parseFloat(cs.paddingLeft)||0;
+  const t=editor.value;
+  let inner=ov.firstElementChild;
+  if(!inner){inner=document.createElement('div');inner.style.cssText='position:absolute;top:0;left:0;white-space:inherit;word-break:inherit;overflow-wrap:inherit;will-change:transform;';ov.appendChild(inner);}
+  if(cs.whiteSpace==='pre'){
+    // no wrap: one logical line per row — render only the visible slice
+    const first=Math.max(0,Math.floor((editor.scrollTop-padTop)/lh)-3);
+    const count=Math.ceil(editor.clientHeight/lh)+6;
+    const a=_hlLineOffset(t,first),b=_hlLineOffset(t,first+count);
+    inner.style.width='auto';
+    inner.innerHTML=_hlBuild(t,a,b);
+    inner.style.transform=`translate(${padLeft-editor.scrollLeft}px,${padTop+first*lh-editor.scrollTop}px)`;
+  }else{
+    // word wrap: row geometry depends on wrap points, so render everything
+    // at exactly the textarea's content width so lines wrap identically
+    inner.style.width=(editor.clientWidth-padLeft-(parseFloat(cs.paddingRight)||0))+'px';
+    inner.innerHTML=_hlBuild(t,0,t.length);
+    inner.style.transform=`translate(${padLeft}px,${padTop-editor.scrollTop}px)`;
+  }
+}
+let _hlScrollRAF=0;
+editor.addEventListener('scroll',()=>{renderLineNumbers();if(searchOn&&_searchMatches.length&&!_hlScrollRAF){_hlScrollRAF=requestAnimationFrame(()=>{_hlScrollRAF=0;renderSearchHighlight();});}});
 editor.addEventListener('input',()=>{if(S.activeTab){S.files[S.activeTab].modified=true;renderTabs();renderTree();debouncedPersist();renderLineNumbers();if(searchOn){const q=document.getElementById('search-input').value;if(q){_searchMatches=[...editor.value.matchAll(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'))];_searchIdx=Math.min(_searchIdx,Math.max(0,_searchMatches.length-1));document.getElementById('search-count').textContent=_searchMatches.length?`${_searchIdx+1} of ${_searchMatches.length}`:'No matches';}else _searchMatches=[];renderSearchHighlight();}}});
 let _persistTimer;function debouncedPersist(){clearTimeout(_persistTimer);_persistTimer=setTimeout(persist,2000);}
 editor.addEventListener('keydown',e=>{
@@ -1078,7 +1129,7 @@ document.addEventListener('touchstart',snapSelIfEditor,{passive:true});
 function updateCursor(){const v=editor.value.substring(0,editor.selectionStart).split('\n');document.getElementById('cursor-pos').textContent=`Ln ${v.length}, Col ${v[v.length-1].length+1}`;}
 function editorCmd(cmd){editor.focus();document.execCommand(cmd);}
 function changeFontSize(d){S.fontSize=Math.max(8,Math.min(32,S.fontSize+d));editor.style.fontSize=S.fontSize+'px';renderLineNumbers();renderSearchHighlight();}
-function toggleWordWrap(){S.wordWrap=!S.wordWrap;editor.style.whiteSpace=S.wordWrap?'pre-wrap':'pre';}
+function toggleWordWrap(){S.wordWrap=!S.wordWrap;editor.style.whiteSpace=S.wordWrap?'pre-wrap':'pre';renderSearchHighlight();}
 function toggleIndent(){S.tabSize=S.tabSize===2?4:2;document.getElementById('indent-type').textContent=`Spaces: ${S.tabSize}`;}
 function applySettings(){S.fontSize=parseInt(document.getElementById('set-fontsize').value);editor.style.fontSize=S.fontSize+'px';editor.style.fontFamily=document.getElementById('set-fontfamily').value;editor.style.whiteSpace=document.getElementById('set-wordwrap').value;persist();renderLineNumbers();renderSearchHighlight();}
 function setAccentColor(c){document.documentElement.style.setProperty('--accent',c);const r=parseInt(c.slice(1,3),16),g=parseInt(c.slice(3,5),16),b=parseInt(c.slice(5,7),16);document.documentElement.style.setProperty('--accent-dim',`rgba(${r},${g},${b},0.18)`);persist();}
@@ -1122,7 +1173,7 @@ document.getElementById('search-input').addEventListener('input',e=>{const q=e.t
 document.getElementById('search-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.shiftKey?searchPrev():searchNext();}if(e.key==='Escape')closeSearch();});
 function searchNext(){if(!_searchMatches.length)return;_searchIdx=(_searchIdx+1)%_searchMatches.length;scrollToMatch();}
 function searchPrev(){if(!_searchMatches.length)return;_searchIdx=(_searchIdx-1+_searchMatches.length)%_searchMatches.length;scrollToMatch();}
-function scrollToMatch(){const m=_searchMatches[_searchIdx];if(!m)return;const linesBefore=editor.value.substring(0,m.index).split('\n').length-1;editor.scrollTop=Math.max(0,linesBefore*20+10-editor.clientHeight/2);document.getElementById('search-count').textContent=`${_searchIdx+1} of ${_searchMatches.length}`;renderSearchHighlight();}
+function scrollToMatch(){const m=_searchMatches[_searchIdx];if(!m)return;const cs=getComputedStyle(editor);const lh=parseFloat(cs.lineHeight)||20;const linesBefore=editor.value.substring(0,m.index).split('\n').length-1;editor.scrollTop=Math.max(0,linesBefore*lh+(parseFloat(cs.paddingTop)||0)-editor.clientHeight/2);document.getElementById('search-count').textContent=`${_searchIdx+1} of ${_searchMatches.length}`;renderSearchHighlight();}
 function globalSearch(q){const r=document.getElementById('search-results');if(!q){r.innerHTML='';return;}let h='';Object.entries(S.files).forEach(([path,file])=>{const lines=file.content.split('\n');const ms=[];lines.forEach((line,i)=>{if(line.toLowerCase().includes(q.toLowerCase())){const hi=line.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),m=>`<mark>${m}</mark>`);ms.push({n:i+1,t:hi});}});if(ms.length){h+=`<div class="search-result-file">${path} (${ms.length})</div>`;ms.slice(0,5).forEach(m=>{h+=`<div class="search-result-line" onclick="openTab('${path}')"><span class="search-result-num">${m.n}</span><span style="font-size:12px;">${m.t}</span></div>`;});}});r.innerHTML=h||'<div style="color:var(--text-2);font-size:12px;padding:8px;">No results</div>';}
 
 // ══ TERMINAL ════════════════════════════════════════════════════════════
@@ -1191,19 +1242,29 @@ function ghRefresh(){if(S.gh.token){ghLoadUser();ghLoadRepos();}}
 async function ghDisconnect(){if(!await askConfirm('Disconnect GitHub account?','Disconnect'))return;S.gh.token='';S.ghUser=null;S.ghRepos=[];document.getElementById('gh-not-connected').classList.remove('hidden');document.getElementById('gh-connected').classList.add('hidden');document.getElementById('gh-status-text').textContent='GitHub: Not connected';persist();closeModal('github-modal');}
 
 // ══ WEBLLM ════════════════════════════════════════════════════════════
-let webllmEngine=null, webllmLoading=false, webllmLoadedModel=null;
+let webllmEngine=null, webllmLoading=false, webllmLoadedModel=null, webllmCtxWin=null;
+// Mobile browsers (especially iOS Safari) hard-kill the tab when the WebGPU
+// KV cache + weights exceed the tab memory budget, so cap the engine context.
+function isMobileDevice(){return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);}
 function shortModelName(id){ return (id||'').replace(/-instruct/i,'').replace(/-it$/i,'').replace(/-q[0-9][^-]*(-MLC)?((-[0-9]+k))?$/i,'').replace(/-MLC$/i,''); }
 function webllmAvailable(){return typeof navigator!=='undefined'&&!!navigator.gpu;}
 async function testWebLLM(){const res=document.getElementById('webllm-test-result');if(webllmAvailable()){res.textContent='✓ WebGPU available';res.style.color='var(--green)';document.getElementById('webllm-dot').style.background='var(--green)';}else{res.textContent='✗ WebGPU not available — use Chrome/Edge 113+ and enable WebGPU';res.style.color='var(--red)';document.getElementById('webllm-dot').style.background='var(--red)';}}
 async function ensureWebLLMReady(){if(!window.webllm){await new Promise(res=>{if(window.webllm)return res();window.addEventListener('webllm-ready',res,{once:true});setTimeout(res,8000);});}if(!window.webllm)throw new Error('WebLLM library failed to load (check your network connection)');if(!webllmAvailable())throw new Error('WebGPU is not available in this browser. Use Chrome or Edge 113+.');}
-async function loadWebLLMModel(modelId){modelId=modelId||document.getElementById('cfg-webllm-model')?.value||S.ai.webllmModel;if(webllmLoading)return;if(webllmEngine&&webllmLoadedModel===modelId)return webllmEngine;webllmLoading=true;const prog=document.getElementById('webllm-progress'),bar=document.getElementById('webllm-progress-bar'),txt=document.getElementById('webllm-progress-text');const res=document.getElementById('webllm-test-result');if(res){res.textContent='';}if(prog){prog.style.display='block';bar.style.width='0%';txt.textContent='Initializing...';}try{await ensureWebLLMReady();const initProgressCallback=(report)=>{const pct=Math.round((report.progress||0)*100);if(bar)bar.style.width=pct+'%';if(txt)txt.textContent=report.text||`Loading... ${pct}%`;if(document.getElementById('webllm-status-text'))document.getElementById('webllm-status-text').textContent=`Loading ${modelId}: ${pct}%`;};webllmEngine=await window.webllm.CreateMLCEngine(modelId,{initProgressCallback});webllmLoadedModel=modelId;if(txt)txt.textContent='✓ Model loaded and ready';if(bar)bar.style.width='100%';if(res){res.textContent='✓ Model ready';res.style.color='var(--green)';}document.getElementById('webllm-dot').style.background='var(--green)';return webllmEngine;}catch(e){if(txt)txt.textContent='Failed: '+e.message;if(res){res.textContent='✗ '+e.message;res.style.color='var(--red)';}webllmEngine=null;webllmLoadedModel=null;throw e;}finally{webllmLoading=false;}}
-async function callWebLLM(messages,sys){const modelId=S.ai.webllmModel;const engine=await loadWebLLMModel(modelId);let maxTok=S.ai.maxTokens;if(!Number.isFinite(maxTok)||maxTok<=0)maxTok=1024;const cap=/0\.[56]B|1\.[05]B|Phi-1_5|gemma-2-2b/i.test(modelId)?1024:(/1\.7B|3B|Phi-3\.5/i.test(modelId)?2048:4096);maxTok=Math.min(maxTok,cap);const reply=await engine.chat.completions.create({messages:[{role:'system',content:sys},...messages],temperature:S.ai.temperature,top_p:0.8,presence_penalty:0.5,max_tokens:maxTok,extra_body:{enable_thinking:false}});return reply.choices?.[0]?.message?.content||'';}
+async function loadWebLLMModel(modelId){modelId=modelId||document.getElementById('cfg-webllm-model')?.value||S.ai.webllmModel;if(webllmLoading)return;if(webllmEngine&&webllmLoadedModel===modelId)return webllmEngine;webllmLoading=true;const prog=document.getElementById('webllm-progress'),bar=document.getElementById('webllm-progress-bar'),txt=document.getElementById('webllm-progress-text');const res=document.getElementById('webllm-test-result');if(res){res.textContent='';}if(prog){prog.style.display='block';bar.style.width='0%';txt.textContent='Initializing...';}try{await ensureWebLLMReady();const initProgressCallback=(report)=>{const pct=Math.round((report.progress||0)*100);if(bar)bar.style.width=pct+'%';if(txt)txt.textContent=report.text||`Loading... ${pct}%`;if(document.getElementById('webllm-status-text'))document.getElementById('webllm-status-text').textContent=`Loading ${modelId}: ${pct}%`;};const wantedWin=S.ai.contextWindow||4096;const engineWin=Math.max(1024,Math.min(wantedWin,isMobileDevice()?2048:8192));webllmEngine=await window.webllm.CreateMLCEngine(modelId,{initProgressCallback},{context_window_size:engineWin});webllmCtxWin=engineWin;webllmLoadedModel=modelId;if(engineWin<wantedWin)aiMsg('system',`ℹ️ Engine context window capped at ${engineWin.toLocaleString()} tokens on this device to avoid browser memory kills (you asked for ${wantedWin.toLocaleString()}). History trimming uses the capped value.`);if(txt)txt.textContent='✓ Model loaded and ready';if(bar)bar.style.width='100%';if(res){res.textContent='✓ Model ready';res.style.color='var(--green)';}document.getElementById('webllm-dot').style.background='var(--green)';return webllmEngine;}catch(e){if(txt)txt.textContent='Failed: '+e.message;if(res){res.textContent='✗ '+e.message;res.style.color='var(--red)';}webllmEngine=null;webllmLoadedModel=null;throw e;}finally{webllmLoading=false;}}
+async function callWebLLM(messages,sys){const modelId=S.ai.webllmModel;const engine=await loadWebLLMModel(modelId);let maxTok=S.ai.maxTokens;if(!Number.isFinite(maxTok)||maxTok<=0)maxTok=1024;const cap=/0\.[56]B|1\.[05]B|Phi-1_5|gemma-2-2b/i.test(modelId)?1024:(/1\.7B|3B|Phi-3\.5/i.test(modelId)?2048:4096);maxTok=Math.min(maxTok,cap);if(webllmCtxWin)maxTok=Math.min(maxTok,Math.max(256,Math.floor(webllmCtxWin*0.4)));const reply=await engine.chat.completions.create({messages:[{role:'system',content:sys},...messages],temperature:S.ai.temperature,top_p:0.8,presence_penalty:0.5,max_tokens:maxTok,extra_body:{enable_thinking:false}});return reply.choices?.[0]?.message?.content||'';}
 
 // ══ TOKEN ESTIMATION & SLIDING CONTEXT WINDOW ════════════════════════════
 // Rough approximation: ~4 characters per token (GPT-style BPE tokenisation).
 // Good enough for budget management; exact counts vary by model/vocabulary.
 function estimateTokens(text){
   return Math.ceil((text||'').length/4);
+}
+
+// The window the conversation must actually fit in: the user-configured
+// budget, further capped by the loaded WebLLM engine's context window.
+function effectiveCtxWindow(){
+  const cfg=S.ai.contextWindow||4096;
+  return (S.ai.backend==='webllm'&&webllmCtxWin)?Math.min(cfg,webllmCtxWin):cfg;
 }
 
 /**
@@ -1227,7 +1288,7 @@ function estimateTokens(text){
  * Returns the trimmed messages array (never empty if input was non-empty).
  */
 function applyContextWindow(messages, sys){
-  const win = S.ai.contextWindow || 4096;
+  const win = effectiveCtxWindow();
 
   // Reserve a proportional chunk for the model's output; cap so budget > 0.
   const maxOut = Math.min(
@@ -1280,7 +1341,7 @@ function updateCtxTokenBar(){
   const histT = S.aiHistory.reduce((a,m) => a + estimateTokens(m.content) + 8, 0);
   const inputT= estimateTokens((document.getElementById('ai-input')||{}).value || '');
   const total = sysT + histT + inputT;
-  const win   = S.ai.contextWindow || 4096;
+  const win   = effectiveCtxWindow();
   const pct   = Math.min(100, Math.round(total / win * 100));
   const color = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--amber)' : 'var(--accent)';
 
@@ -1307,6 +1368,9 @@ function stripThink(t){
 // inlining big files we give the model line-oriented commands (@@READ,
 // @@REPLACE, ...) and run a bounded request→result loop in sendAIMessage.
 const AI_READ_MAX_LINES=120, AI_TOOL_MAX_STEPS=6, AI_INLINE_FILE_LIMIT=3000;
+// Fingerprint phrases from the tool instructions: if a reply contains them,
+// the model is echoing its prompt ("prompt bleed") rather than acting.
+const AI_ECHO_MARKS=['the exact existing text','overwrite those lines with the fenced','find where that text appears','end your reply with ONE command'];
 
 function buildToolsSystemNote(){
   const active=S.activeTab?`\nThe user's open file is "${S.activeTab}" — commands that omit the file name target it.`:'';
@@ -1489,20 +1553,27 @@ async function sendAIMessage(){
     // Agentic loop: the model may issue @@ tool commands to read / search /
     // edit project files chunk by chunk. Each result is fed back to it until
     // it produces a final answer (or the step budget runs out).
-    let r='',steps=0;
+    let r='',steps=0,bounces=0,lastReply=null;
     while(true){
       r=stripThink(await callAI(S.aiHistory,buildSys()));
       const tool=parseAIToolCall(r);
       // Tiny models sometimes parrot the file-block format with placeholder
-      // contents instead of doing the work — bounce those back as an error
-      // so the model gets another attempt instead of ending the turn.
+      // contents, or echo the tool instructions verbatim, instead of doing
+      // the work — bounce those back as an error so the model gets another
+      // attempt instead of ending the turn.
       const junk=!tool&&r.match(/```file:([^\n`]+)\n([\s\S]*?)```/);
       const junkEmpty=!!(junk&&junk[2].replace(/[.…\s`]/g,'')==='');
-      if(!tool&&!junkEmpty)break;
+      const echoed=!tool&&!junkEmpty&&AI_ECHO_MARKS.some(p=>r.includes(p));
+      if(!tool&&!junkEmpty&&!echoed)break;
+      if(r===lastReply){aiMsg('system','⚠️ Model is repeating itself — stopping here.');break;}
+      lastReply=r;
+      if((junkEmpty||echoed)&&bounces>=2){aiMsg('system','⚠️ The model keeps echoing its instructions instead of acting — it is likely too small for this task. Try a larger model (tap the model badge).');break;}
       if(steps>=AI_TOOL_MAX_STEPS){aiMsg('system','⚠️ Tool step limit reached — answering with what was gathered so far.');break;}
-      steps++;
+      steps++;if(junkEmpty||echoed)bounces++;
       S.aiHistory.push({role:'assistant',content:r});
-      const res=tool?execAITool(tool):{note:'rejected empty file block — retrying',output:`ERROR: that file: block for "${junk[1].trim()}" had no real content — never repeat the format example. To change existing text, use @@EDIT with a SEARCH/REPLACE block containing the real text.`};
+      const res=tool?execAITool(tool)
+        :junkEmpty?{note:'rejected empty file block — retrying',output:`ERROR: that file: block for "${junk[1].trim()}" had no real content — never repeat the format example. To change existing text, use @@EDIT with a SEARCH/REPLACE block containing the real text.`}
+        :{note:'model echoed instructions — retrying',output:'ERROR: you repeated the instructions instead of doing the task. Do the task now: reply with ONE real command using actual text and file names from this project (for find-and-replace: @@EDIT, then a SEARCH block with the real text to change), or give the final answer.'};
       aiMsg('system','🔧 '+res.note);
       S.aiHistory.push({role:'user',content:'[tool result]\n'+res.output});
       updateCtxTokenBar();
