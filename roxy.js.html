@@ -502,8 +502,8 @@ function endPtr(e){
     editDirect.ptId=null;editDirect.pending=false;editDirect.active=false;editDirect.snap=null;EM._propW=null;EM._mirMap=null;}
   if(active.view==='paint'&&paint.mode3d&&paint.drawing){
     paint.drawing=false;paint.last=null;paint._last3d=null;
-    var bef=paint._3dSnap,aft=paint.ctx.getImageData(0,0,1024,1024),tx=paint.tex;
-    if(bef){History.push(function(){paint.ctx.putImageData(bef,0,0);tx.needsUpdate=true;invalidate();},function(){paint.ctx.putImageData(aft,0,0);tx.needsUpdate=true;invalidate();});}
+    var bef=paint._3dSnap,aft=paint.ctx.getImageData(0,0,1024,1024);
+    if(bef)pushPaintHistory(bef,aft);
     paint._3dSnap=null;}
   ptrs.delete(e.pointerId);lastDist=0;lastMid=null;
   if(clickStart&&clickStart.id===e.pointerId&&Date.now()-clickStart.t<350&&Math.hypot(e.clientX-clickStart.x,e.clientY-clickStart.y)<6){
@@ -562,13 +562,20 @@ function applyMatPreset(mat,name){var p=MATPRESETS[name];if(!p)return;
 function makeModel(name,parts){var g=new THREE.Group();g.name=name;var extras=new THREE.Group();extras.name='__extras';
   g.userData={id:uid(),name:name,parts:[],mods:[],extras:extras};
   parts.forEach(function(p){var mesh=new THREE.Mesh(p.geo.clone(),p.mat);mesh.castShadow=true;mesh.receiveShadow=true;mesh.userData.part=true;
-    g.add(mesh);g.userData.parts.push({baseGeo:p.geo.clone(),mesh:mesh,mat:p.mat,_hasProperUVs:!!p._hasProperUVs});});
+    g.add(mesh);g.userData.parts.push({baseGeo:p.geo.clone(),mesh:mesh,mat:p.mat,_hasProperUVs:!!p._hasProperUVs,_baseIsAtlas:!!p._baseIsAtlas});});
   g.add(extras);return g;}
 
 function rebuildModel(model){var ud=model.userData;
-  ud.parts.forEach(function(part){var geo=part.baseGeo.clone();
+  ud.parts.forEach(function(part,pi){var geo=part.baseGeo.clone();
     ud.mods.forEach(function(m){var def=MODDB[m.def];if(def&&def.kind==='deform'&&m.on){var r=def.apply(geo,m.val);if(r&&r.isBufferGeometry&&r!==geo){var prev=geo;geo=r;if(prev.dispose)prev.dispose();}}});
-    geo.computeVertexNormals();var old=part.mesh.geometry;part.mesh.geometry=geo;part._atlasUVs=false;if(old&&old!==part.baseGeo)old.dispose();});
+    // When the atlas has been promoted into baseGeo (_baseIsAtlas), the deformed geometry
+    // already carries the atlas UVs, so the paint state survives the rebuild untouched.
+    geo.computeVertexNormals();var old=part.mesh.geometry,wasAtlas=part._atlasUVs;part.mesh.geometry=geo;part._atlasUVs=!!part._baseIsAtlas;if(old&&old!==part.baseGeo)old.dispose();
+    // Otherwise, if this part was mid-3D-paint with a not-yet-promoted atlas (a deform was
+    // active when painting), the fresh geometry has the model's original (often overlapping)
+    // UVs while the canvas is still atlas-layout — re-derive matching atlas UVs on it
+    // (keepCanvas: leave the pixels alone; deform preserves face order so tiles line up).
+    if(wasAtlas&&!part._baseIsAtlas&&!part._hasProperUVs)ensureAtlasUVs(model,pi,true);});
   while(ud.extras.children.length)ud.extras.remove(ud.extras.children[0]);
   ud.mods.forEach(function(m){var def=MODDB[m.def];if(def&&def.kind==='gen'&&m.on){var o=def.apply(model,m.val);if(o)ud.extras.add(o);}});invalidate();}
 
@@ -582,7 +589,11 @@ function applyModifiers(m){if(!m)return;
                function(){m.userData.parts.forEach(function(p,i){p.baseGeo=newBase[i];});m.userData.mods=bakedMods.slice();rebuildModel(m);renderPanel();});}
 
 function setActiveModel(id){state.activeId=id;var holder=viewerScene.userData.modelHolder;while(holder.children.length)holder.remove(holder.children[0]);
-  var m=getModel(id);if(m){holder.add(m);frameObject(m,viewState.viewer);}invalidate();if(active.view==='viewer'||active.view==='paint')renderPanel();}
+  var m=getModel(id);if(m){holder.add(m);frameObject(m,viewState.viewer);}invalidate();
+  // If we're painting, rebind the editor to the newly-active model — paintInit freezes the
+  // previous model's texture first, so switching models never bleeds paint between them.
+  if(active.view==='paint')paintInit();
+  if(active.view==='viewer'||active.view==='paint')renderPanel();}
 function getModel(id){for(var i=0;i<state.models.length;i++)if(state.models[i].userData.id===id)return state.models[i];return null;}
 function addModel(m){state.models.push(m);scheduleAutosave();return m;}
 function renameModel(m){
@@ -592,7 +603,7 @@ function renameModel(m){
   History.push(function(){m.userData.name=old;renderAssets();renderPanel();},
                function(){m.userData.name=nv;renderAssets();renderPanel();});}
 function duplicateModel(m){
-  var parts=m.userData.parts.map(function(p){return {geo:p.mesh.geometry.clone(),mat:p.mat.clone(),_hasProperUVs:p._hasProperUVs};});
+  var parts=m.userData.parts.map(function(p){return {geo:p.mesh.geometry.clone(),mat:p.mat.clone(),_hasProperUVs:p._hasProperUVs,_baseIsAtlas:p._baseIsAtlas};});
   var name=m.userData.name+' Copy';
   var nm=makeModel(name,parts);
   addModel(nm);setActiveModel(nm.userData.id);toast('"'+name+'" duplicated');renderAssets();}
@@ -737,7 +748,8 @@ function parseOBJ(text){var V=[],VT=[],VN=[],pos=[],uv=[],nor=[];var lines=text.
      if(c[2]&&VN[+c[2]-1]){var n2=VN[+c[2]-1];nor.push(n2[0],n2[1],n2[2]);}else nor.push(0,0,0);});}}});
  var g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));if(nor.some(function(x){return x!==0;}))g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));else g.computeVertexNormals();
- g.computeBoundingBox();var c=new THREE.Vector3();g.boundingBox.getCenter(c);g.translate(-c.x,-c.y,-c.z);return g;}
+ g.computeBoundingBox();var c=new THREE.Vector3();g.boundingBox.getCenter(c);g.translate(-c.x,-c.y,-c.z);
+ g.userData.hasUV=VT.length>0;return g;}
 
 function importGLB(buf){ // node transforms, interleaved buffers, embedded baseColor textures
  var dv=new DataView(buf);if(dv.getUint32(0,true)!==0x46546C67)throw new Error('not glb');
@@ -860,14 +872,32 @@ function exportOBJ(root,name){root.updateWorldMatrix(true,true);var rootInv=new 
   toast('Exported '+name+(texFiles.length?' + .mtl + texture png':''));}
 
 /* ---------------- paint ---------------- */
-var paint={cv:$('#paintCanvas'),ctx:null,part:0,color:'#d8466a',size:38,soft:0,erase:false,eyedrop:false,drawing:false,last:null,tex:null,mode3d:false,_3dSnap:null,_lastFaceIdx:-1,_last3d:null};
+var paint={cv:$('#paintCanvas'),ctx:null,part:0,color:'#d8466a',size:38,soft:0,erase:false,eyedrop:false,drawing:false,last:null,tex:null,mode3d:false,_3dSnap:null,_lastFaceIdx:-1,_last3d:null,_boundMat:null};
 paint.ctx=paint.cv.getContext('2d');
+// The 2D editor paints onto ONE shared #paintCanvas, and while a model is being edited its
+// material samples that live canvas. Before the canvas is rebound to a different model, freeze
+// the outgoing model's pixels into its OWN independent canvas/texture — otherwise every painted
+// model would keep pointing at the single shared canvas and editing one would overwrite them all.
+function freezePaintTexture(){var bm=paint._boundMat;if(!bm||bm.map!==paint.tex)return;
+  var snap=el('canvas');snap.width=snap.height=1024;snap.getContext('2d').drawImage(paint.cv,0,0);
+  bm.map=tex(snap,true,[1,1]);bm.needsUpdate=true;paint._boundMat=null;}
 function paintInit(){var m=getModel(state.activeId);var part=m&&m.userData.parts[paint.part];var mat=part&&part.mat;
-  if(paint.tex&&mat&&mat.map===paint.tex){applyPaintTex();return;}
+  if(!mat)return;
+  if(paint._boundMat===mat){applyPaintTex();return;}   // already live-editing this exact part
+  freezePaintTexture();                                 // freeze whatever other part was live first
   paint.ctx.fillStyle='#ffffff';paint.ctx.fillRect(0,0,1024,1024);
-  if(mat&&mat.map&&mat.map.image&&mat.map.image!==paint.cv){try{paint.ctx.drawImage(mat.map.image,0,0,1024,1024);}catch(e){}}
-  paint.tex=tex(paint.cv,true,[1,1]);applyPaintTex();}
+  if(mat.map&&mat.map.image&&mat.map.image!==paint.cv){try{paint.ctx.drawImage(mat.map.image,0,0,1024,1024);}catch(e){}}
+  paint.tex=tex(paint.cv,true,[1,1]);paint._boundMat=mat;applyPaintTex();}
 function applyPaintTex(){var m=getModel(state.activeId);if(m&&m.userData.parts[paint.part]){var mat=m.userData.parts[paint.part].mat;mat.map=paint.tex;mat.color.setHex(0xffffff);mat.needsUpdate=true;}}
+// Record a paint edit so undo/redo targets the model the stroke belongs to. If that model is
+// still live-bound, write to the shared editor canvas; if the user has since switched models,
+// write to the model's own frozen canvas instead of clobbering whatever is being edited now.
+function pushPaintHistory(before,after){var mat=paint._boundMat;
+  function apply(data){
+    if(paint._boundMat===mat){paint.ctx.putImageData(data,0,0);if(paint.tex)paint.tex.needsUpdate=true;}
+    else if(mat&&mat.map&&mat.map.image&&mat.map.image.getContext){mat.map.image.getContext('2d').putImageData(data,0,0);mat.map.needsUpdate=true;}
+    invalidate();}
+  History.push(function(){apply(before);},function(){apply(after);});}
 function paintAt(x,y){var c=paint.ctx;c.globalCompositeOperation=paint.erase?'destination-out':'source-over';c.strokeStyle=paint.color;c.fillStyle=paint.color;c.lineWidth=paint.size;c.lineCap='round';c.lineJoin='round';
   if(paint.soft>0){c.shadowBlur=paint.soft*paint.size*0.9;c.shadowColor=paint.erase?'rgba(0,0,0,1)':paint.color;}else c.shadowBlur=0;
   if(paint.last){c.beginPath();c.moveTo(paint.last.x,paint.last.y);c.lineTo(x,y);c.stroke();}else{c.beginPath();c.arc(x,y,paint.size/2,0,7);c.fill();}
@@ -878,8 +908,8 @@ function paintPattern(kind){var c=paint.ctx,S=1024,before=c.getImageData(0,0,S,S
   else if(kind==='dots'){c.fillStyle='#ffffff';c.fillRect(0,0,S,S);c.fillStyle=paint.color;for(var y=0;y<S;y+=80)for(var x=0;x<S;x+=80){c.beginPath();c.arc(x+40,y+40,18,0,7);c.fill();}}
   else if(kind==='gradient'){var g=c.createLinearGradient(0,0,0,S);g.addColorStop(0,paint.color);g.addColorStop(1,'#ffffff');c.fillStyle=g;c.fillRect(0,0,S,S);}
   else if(kind==='sprinkles'){c.fillStyle='#ffffff';c.fillRect(0,0,S,S);var cols=['#ff5d8f','#ffd23f','#5ec5ff','#7be0a3','#c08bff','#ff8a3d'];for(var i=0;i<900;i++){var x=Math.random()*S,y=Math.random()*S,a=Math.random()*Math.PI;c.save();c.translate(x,y);c.rotate(a);c.fillStyle=cols[(Math.random()*cols.length)|0];c.fillRect(-3,-12,6,24);c.restore();}}
-  var after=c.getImageData(0,0,S,S),tx=paint.tex;paint.tex.needsUpdate=true;invalidate();
-  History.push(function(){c.putImageData(before,0,0);tx.needsUpdate=true;invalidate();},function(){c.putImageData(after,0,0);tx.needsUpdate=true;invalidate();});}
+  var after=c.getImageData(0,0,S,S);paint.tex.needsUpdate=true;invalidate();
+  pushPaintHistory(before,after);}
 function paintUV(x,y){var r=paint.cv.getBoundingClientRect();return {x:(x-r.left)/r.width*1024,y:(y-r.top)/r.height*1024};}
 
 /* ----- eyedropper: pick brush color from the texture, 2D canvas or 3D surface ----- */
@@ -905,8 +935,8 @@ function pickColorAt3D(clientX,clientY){
     if(paint.eyedrop){pickColorAt2D(u.x,u.y);return;}
     c.setPointerCapture(e.pointerId);paint.drawing=true;paint.last=null;snap=paint.ctx.getImageData(0,0,1024,1024);paintAt(u.x,u.y);});
   c.addEventListener('pointermove',function(e){if(paint.mode3d||!paint.drawing)return;var u=paintUV(e.clientX,e.clientY);paintAt(u.x,u.y);});
-  function up(){if(!paint.drawing)return;paint.drawing=false;paint.last=null;if(snap){var before=snap,after=paint.ctx.getImageData(0,0,1024,1024);var tx=paint.tex;
-    History.push(function(){paint.ctx.putImageData(before,0,0);tx.needsUpdate=true;invalidate();},function(){paint.ctx.putImageData(after,0,0);tx.needsUpdate=true;invalidate();});snap=null;}}
+  function up(){if(!paint.drawing)return;paint.drawing=false;paint.last=null;if(snap){var before=snap,after=paint.ctx.getImageData(0,0,1024,1024);
+    pushPaintHistory(before,after);snap=null;}}
   c.addEventListener('pointerup',up);c.addEventListener('pointercancel',up);})();
 function paintDrawUV(){var m=getModel(state.activeId);if(!m||!m.userData.parts[paint.part])return;var geo=m.userData.parts[paint.part].mesh.geometry;var uv=geo.attributes.uv;if(!uv){toast('This part has no UVs');return;}
   var c=paint.ctx;c.save();c.globalCompositeOperation='source-over';c.strokeStyle='rgba(0,0,0,.35)';c.lineWidth=1;var idx=geo.index;var S=1024;
@@ -1129,10 +1159,20 @@ function syncSceneFromModels(){/* placements already live in sceneScene holder *
 function addPlacement(modelId){var src=getModel(modelId);if(!src)return;var inst=src.clone(true);inst.userData={placement:true,modelId:modelId,name:src.userData.name};
   inst.traverse(function(o){if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});var n=sceneScene.userData.holder.children.length;inst.position.set((n%3-1)*2.4,0,Math.floor(n/3)*2.4);sceneScene.userData.holder.add(inst);state.selScene=inst;
   History.push(function(){sceneScene.userData.holder.remove(inst);if(state.selScene===inst)state.selScene=null;},function(){sceneScene.userData.holder.add(inst);state.selScene=inst;});invalidate();if(active.view==='scene')renderPanel();}
-function addLight(kind){var L,helper;if(kind==='Point'){L=new THREE.PointLight(0xffffff,12,30);L.position.set(2,3,2);}else if(kind==='Spot'){L=new THREE.SpotLight(0xffffff,18,30,.6,.4);L.position.set(3,5,2);}else{L=new THREE.DirectionalLight(0xffffff,2);L.position.set(3,5,2);}
-  L.castShadow=true;var sph=new THREE.Mesh(new THREE.SphereGeometry(.12,12,8),new THREE.MeshBasicMaterial({color:0xffe9a8}));sph.position.copy(L.position);L.userData.helper=sph;L.userData.kind=kind;
-  sceneScene.userData.lights.add(L);sceneScene.userData.lights.add(sph);state.selLight=L;state.selScene=null;
-  History.push(function(){sceneScene.userData.lights.remove(L);sceneScene.userData.lights.remove(sph);if(state.selLight===L)state.selLight=null;},function(){sceneScene.userData.lights.add(L);sceneScene.userData.lights.add(sph);state.selLight=L;});renderPanel();}
+// Create a light + its helper sphere and add both to the scene. Shared by the "+ Light"
+// buttons (defaults) and project restore (saved params) so the two never diverge.
+function spawnLight(kind,params){params=params||{};var L;
+  if(kind==='Point')L=new THREE.PointLight(0xffffff,params.intensity!=null?params.intensity:12,params.distance||30);
+  else if(kind==='Spot')L=new THREE.SpotLight(0xffffff,params.intensity!=null?params.intensity:18,params.distance||30,params.angle!=null?params.angle:.6,params.penumbra!=null?params.penumbra:.4);
+  else L=new THREE.DirectionalLight(0xffffff,params.intensity!=null?params.intensity:2);
+  L.castShadow=true;
+  if(params.pos)L.position.fromArray(params.pos);else L.position.set(kind==='Point'?2:3,kind==='Point'?3:5,2);
+  if(params.color)L.color.set(params.color);
+  var sph=new THREE.Mesh(new THREE.SphereGeometry(.12,12,8),new THREE.MeshBasicMaterial({color:0xffe9a8}));
+  sph.position.copy(L.position);sph.material.color.copy(L.color);L.userData.helper=sph;L.userData.kind=kind;
+  sceneScene.userData.lights.add(L);sceneScene.userData.lights.add(sph);return L;}
+function addLight(kind){var L=spawnLight(kind);state.selLight=L;state.selScene=null;
+  History.push(function(){sceneScene.userData.lights.remove(L);sceneScene.userData.lights.remove(L.userData.helper);if(state.selLight===L)state.selLight=null;},function(){sceneScene.userData.lights.add(L);sceneScene.userData.lights.add(L.userData.helper);state.selLight=L;});renderPanel();}
 function panelScene(b){b.appendChild(el('h2',{text:'Scene'}));b.appendChild(el('p',{class:'sub',text:'Compose models, lights & camera, then render.'}));
   b.appendChild(el('div',{class:'section-title',text:'Environment'}));var es=el('select',{onchange:function(e){applyEnv(sceneScene,e.target.value);}});ENVS.forEach(function(p){es.appendChild(el('option',{value:p.id,text:p.name}));});es.value=sceneScene.userData.envId;b.appendChild(es);
   var bgIn=el('input',{type:'color',value:'#'+(sceneScene.background&&sceneScene.background.getHexString?sceneScene.background.getHexString():'14100c'),oninput:function(e){sceneScene.background=new THREE.Color(e.target.value);invalidate();}});
@@ -1238,7 +1278,7 @@ function filterAssetGrid(){var grid=$('#assetsGrid');if(!grid)return;
 /* ----- file inputs ----- */
 var imgTarget='paint';
 $('#fileModel').addEventListener('change',function(e){var f=e.target.files[0];if(!f)return;var rd=new FileReader();
-  if(/\.obj$/i.test(f.name)){rd.onload=function(){try{var g=parseOBJ(rd.result);var m=makeModel(f.name.replace(/\.obj$/i,''),[{geo:g,mat:makeMaterial({color:0xcdb7a4,rough:.55})}]);addModel(m);setActiveModel(m.userData.id);setView('viewer');toast('Imported '+f.name);}catch(err){toast('OBJ import failed');console.error(err);}};rd.readAsText(f);}
+  if(/\.obj$/i.test(f.name)){rd.onload=function(){try{var g=parseOBJ(rd.result);var m=makeModel(f.name.replace(/\.obj$/i,''),[{geo:g,mat:makeMaterial({color:0xcdb7a4,rough:.55}),_hasProperUVs:g.userData.hasUV}]);addModel(m);setActiveModel(m.userData.id);setView('viewer');toast('Imported '+f.name);}catch(err){toast('OBJ import failed');console.error(err);}};rd.readAsText(f);}
   else{rd.onload=function(){try{var m=importGLB(rd.result);m.userData.name=f.name.replace(/\.(glb|gltf)$/i,'');addModel(m);setActiveModel(m.userData.id);setView('viewer');toast('Imported '+f.name);}catch(err){toast('GLB import failed (try .obj)');console.error(err);}};rd.readAsArrayBuffer(f);}
   e.target.value='';});
 $('#fileImg').addEventListener('change',function(e){var f=e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(){var img=new Image();img.onload=function(){
@@ -1248,8 +1288,14 @@ $('#fileProj').addEventListener('change',function(e){var f=e.target.files[0];if(
 
 /* ----- project save/load (geometry baked) ----- */
 function texToDataURL(t){if(!t||!t.image)return null;var img=t.image,cv;if(img instanceof HTMLCanvasElement)cv=img;else{cv=el('canvas');cv.width=img.width||512;cv.height=img.height||512;try{cv.getContext('2d').drawImage(img,0,0);}catch(e){return null;}}try{return cv.toDataURL('image/png');}catch(e){return null;}}
-function buildProjectData(skipMaps){return {v:2,scene:{env:sceneScene.userData.envId},models:state.models.map(function(m){return {name:m.userData.name,
+function buildProjectData(skipMaps){return {v:2,scene:{env:sceneScene.userData.envId,
+  bg:(sceneScene.background&&sceneScene.background.getHexString)?('#'+sceneScene.background.getHexString()):null,
+  grid:sceneScene.userData.grid?!!sceneScene.userData.grid.visible:false,
+  placements:sceneScene.userData.holder.children.filter(function(c){return c.userData&&c.userData.placement;}).map(function(c){return {modelId:c.userData.modelId,pos:c.position.toArray(),rot:[c.rotation.x,c.rotation.y,c.rotation.z],scale:c.scale.toArray()};}),
+  lights:sceneScene.userData.lights.children.filter(function(c){return c.isLight;}).map(function(L){return {kind:L.userData.kind,pos:L.position.toArray(),color:'#'+L.color.getHexString(),intensity:L.intensity,distance:L.distance,angle:L.angle,penumbra:L.penumbra};})
+  },models:state.models.map(function(m){return {id:m.userData.id,name:m.userData.name,
   parts:m.userData.parts.map(function(p){var g=p.baseGeo;return {pos:Array.from(g.attributes.position.array),uv:g.attributes.uv?Array.from(g.attributes.uv.array):null,index:g.index?Array.from(g.index.array):null,
+    properUV:!!p._hasProperUVs,baseAtlas:!!p._baseIsAtlas,
     color:'#'+p.mat.color.getHexString(),rough:p.mat.roughness,metal:p.mat.metalness,map:skipMaps?null:texToDataURL(p.mat.map),
     emissive:'#'+p.mat.emissive.getHexString(),emInt:p.mat.emissiveIntensity,opacity:p.mat.opacity,transmission:p.mat.transmission||0,clearcoat:p.mat.clearcoat||0};}),mods:m.userData.mods};})};}
 function saveProject(){var data=buildProjectData(false);
@@ -1274,16 +1320,31 @@ function tryRestoreAutosave(){
   try{loadProject(data);toast('Restored autosave from last session');ok=true;}
   catch(e){try{localStorage.removeItem(AUTOSAVE_KEY);}catch(e2){}}
   autosaveSuspended=false;return ok;}
-function loadProject(data){state.models.length=0;(data.models||[]).forEach(function(md){var parts=md.parts.map(function(pp){var g=new THREE.BufferGeometry();
+function loadProject(data){state.models.length=0;
+  // clear any existing scene composition so a load replaces rather than stacks
+  var _h=sceneScene.userData.holder;while(_h.children.length)_h.remove(_h.children[0]);
+  var _lg=sceneScene.userData.lights;while(_lg.children.length)_lg.remove(_lg.children[0]);
+  state.selScene=null;state.selLight=null;
+  (data.models||[]).forEach(function(md){var parts=md.parts.map(function(pp){var g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pp.pos,3));if(pp.uv)g.setAttribute('uv',new THREE.Float32BufferAttribute(pp.uv,2));if(pp.index)g.setIndex(pp.index);g.computeVertexNormals();
   var mat=makeMaterial({color:new THREE.Color(pp.color).getHex(),rough:pp.rough,metal:pp.metal});
   if(pp.emissive)mat.emissive.set(pp.emissive);if(pp.emInt!=null)mat.emissiveIntensity=pp.emInt;
   if(pp.opacity!=null){mat.opacity=pp.opacity;}if(pp.transmission&&'transmission' in mat)mat.transmission=pp.transmission;if(pp.clearcoat&&'clearcoat' in mat)mat.clearcoat=pp.clearcoat;
   mat.transparent=(mat.opacity<1)||(mat.transmission>0);
   if(pp.map){var im=new Image();im.onload=function(){var tx=new THREE.Texture(im);tx.encoding=THREE.sRGBEncoding;tx.needsUpdate=true;mat.map=tx;mat.color.setHex(0xffffff);mat.needsUpdate=true;invalidate();};im.src=pp.map;}
-  return {geo:g,mat:mat};});
-  var m=makeModel(md.name,parts);m.userData.mods=md.mods||[];rebuildModel(m);addModel(m);});
-  if(data.scene&&data.scene.env)applyEnv(sceneScene,data.scene.env);
+  return {geo:g,mat:mat,_hasProperUVs:!!pp.properUV,_baseIsAtlas:!!pp.baseAtlas};});
+  var m=makeModel(md.name,parts);if(md.id)m.userData.id=md.id;m.userData.mods=md.mods||[];rebuildModel(m);addModel(m);});
+  var sc=data.scene||{};
+  if(sc.env)applyEnv(sceneScene,sc.env);
+  if(sc.bg)sceneScene.background=new THREE.Color(sc.bg);
+  if(sceneScene.userData.grid){sceneScene.userData.grid.visible=!!sc.grid;sceneScene.userData.showGrid=!!sc.grid;}
+  // rebuild scene composition (placements re-link to models by their preserved ids)
+  (sc.placements||[]).forEach(function(pl){var src=getModel(pl.modelId);if(!src)return;
+    var inst=src.clone(true);inst.userData={placement:true,modelId:pl.modelId,name:src.userData.name};
+    inst.traverse(function(o){if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
+    if(pl.pos)inst.position.fromArray(pl.pos);if(pl.rot)inst.rotation.set(pl.rot[0],pl.rot[1],pl.rot[2]);if(pl.scale)inst.scale.fromArray(pl.scale);
+    sceneScene.userData.holder.add(inst);});
+  (sc.lights||[]).forEach(function(ld){spawnLight(ld.kind,ld);});
   if(state.models.length){setActiveModel(state.models[0].userData.id);}renderAssets();}
 
 /* ----- viewport tap selection ----- */
@@ -1469,7 +1530,7 @@ var EM={
     this.V=[];this.F=[];this.E=[];this._triMap=[];},
 
   fromPrim:function(type){
-    EM._srcTex=null;
+    EM._srcTex=null;EM._srcProperUVs=false;
     var mt=this._mat;mt.map=null;mt.color.setHex(0xbba898);mt.transparent=false;mt.opacity=1;mt.needsUpdate=true;
     var s=1,geo;
     // Cube/Plane are built as native quads (not via THREE's triangulating BoxGeometry/
@@ -1561,6 +1622,7 @@ var EM={
     pi=pi||0;if(pi>=m.userData.parts.length)pi=0;
     var pt=m.userData.parts[pi];
     EM._srcTex=pt.mat&&pt.mat.map&&pt.mat.map.image?pt.mat.map:null;
+    EM._srcProperUVs=!!pt._hasProperUVs; // carry the source's real-unwrap status to the export
     // Texture the live edit mesh (per-vertex UVs carried in _fromGeo) so the artist
     // sees the wrapping deform while sculpting; slight transparency keeps depth readable.
     var mt=this._mat;
@@ -2018,7 +2080,10 @@ var EM={
     var mat=makeMaterial({color:EM._srcTex?0xffffff:0xcdb7a4,rough:.55});
     if(EM._srcTex){mat.map=EM._srcTex;mat.needsUpdate=true;}
     var name='Mesh '+(state.models.length+1);var m=makeModel(name,[{geo:geo,mat:mat}]);
-    if(keepUV)m.userData.parts[0]._hasProperUVs=(EM._srcTex.flipY===false);
+    // Inherit the real-unwrap status from the source model (not the texture's flipY, which is
+    // true for painted-canvas sources even when the underlying UVs are a proper GLB unwrap) so
+    // the exported model paints non-destructively iff its source did.
+    if(keepUV)m.userData.parts[0]._hasProperUVs=!!EM._srcProperUVs;
     addModel(m);setActiveModel(m.userData.id);toast('"'+name+'" added — open Viewer');renderPanel();},
 
   // Unindexed triangles keeping each vertex's carried u0/v0 (flat per-face normals)
@@ -2129,7 +2194,7 @@ var EM={
 /* Rebuild any mesh's UVs into a per-face atlas so every triangle gets its
    own unique UV tile — prevents painting on one face from bleeding to
    geometrically unrelated faces (e.g. the back of a sphere). */
-function ensureAtlasUVs(m,pi){
+function ensureAtlasUVs(m,pi,keepCanvas){
   var part=m&&m.userData.parts[pi];if(!part||part._atlasUVs)return;
   var geo=part.mesh.geometry;
   // Non-destructive fast path: a mesh that already carries a real UV unwrap (imported GLB,
@@ -2179,6 +2244,18 @@ function ensureAtlasUVs(m,pi){
   newGeo.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
   newGeo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
   part.mesh.geometry.dispose();part.mesh.geometry=newGeo;part._atlasUVs=true;
+  // Promote the per-face atlas into the persisted base geometry so it survives save/restore
+  // and modifier rebuilds. Only safe when no deform is active — then newGeo's positions equal
+  // the undeformed base, so baseGeo captures the true (un-deformed) atlas rather than a
+  // deformed snapshot that a later rebuild would deform a second time.
+  if(!keepCanvas&&!part._baseIsAtlas){
+    var hasDeform=m.userData.mods&&m.userData.mods.some(function(md){var d=MODDB[md.def];return d&&d.kind==='deform'&&md.on;});
+    if(!hasDeform){var ob=part.baseGeo;part.baseGeo=newGeo.clone();part._baseIsAtlas=true;if(ob&&ob.dispose)ob.dispose();}
+  }
+  // keepCanvas: geometry was rebuilt under an already-atlased canvas (e.g. a modifier
+  // re-deform) — face order is preserved so the existing atlas tiles still line up; only
+  // the per-face UVs are re-derived above, the painted pixels must be left alone.
+  if(!keepCanvas){
   // Bake existing canvas content into new atlas tiles instead of wiping to white
   if(origUVAttr&&paint.tex){
     // Copy current canvas to temp so we can read from it while writing to paint.cv
@@ -2218,7 +2295,8 @@ function ensureAtlasUVs(m,pi){
       paint.ctx.restore();}
   }else{
     paint.ctx.fillStyle='#ffffff';paint.ctx.fillRect(0,0,1024,1024);}
-  if(paint.tex)paint.tex.needsUpdate=true;invalidate();}
+  if(paint.tex)paint.tex.needsUpdate=true;}
+  invalidate();}
 
 // Project a world-space point to dom-local screen pixels
 function projLocal(w,cam,r){var p=w.clone().project(cam);return{x:(p.x*.5+.5)*r.width,y:(1-(p.y*.5+.5))*r.height};}
