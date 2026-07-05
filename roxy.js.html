@@ -209,6 +209,8 @@ canvas{display:block;touch-action:none}
 .hud-btn:active{transform:scale(.93)}
 .hud-sel{font-size:11.5px;color:rgba(255,212,226,.85);background:rgba(18,14,10,.78);padding:4px 12px;
   border-radius:999px;border:1px solid rgba(255,143,177,.28);pointer-events:none;backdrop-filter:blur(8px)}
+#selBox{position:fixed;display:none;border:1.5px dashed rgba(255,143,177,.9);background:rgba(255,143,177,.14);
+  border-radius:3px;z-index:12;pointer-events:none}
 .hud-srow{align-items:center}
 .hud-range{width:150px;pointer-events:auto;touch-action:none}
 .hud-slbl{font-size:11px;color:#ffd4e2;background:rgba(18,14,10,.85);padding:6px 9px;border-radius:8px;pointer-events:none}
@@ -294,6 +296,7 @@ canvas{display:block;touch-action:none}
       <button id="quRedo" title="Redo">↷</button>
     </div>
     <div id="hint"></div>
+    <div id="selBox"></div>
   </main>
 
   <aside id="panel">
@@ -460,6 +463,7 @@ dom.addEventListener('pointerdown',function(e){
     do3dPaint(e.clientX,e.clientY);}
   else if(active.view==='edit'&&ptrs.size===1){
     if(editState.tool==='sculpt'&&EM._meshObj){Sculpt.down(e);}
+    else if(editState.boxSel){editBox.active=true;editBox.ptId=e.pointerId;editBox.x0=e.clientX;editBox.y0=e.clientY;showSelBox(e.clientX,e.clientY,e.clientX,e.clientY);}
     else if(EM.selCount()>0){editDirect.pending=true;editDirect.ptId=e.pointerId;
       editDirect.startX=e.clientX;editDirect.startY=e.clientY;
       editDirect.prevX=e.clientX;editDirect.prevY=e.clientY;}}
@@ -473,6 +477,7 @@ dom.addEventListener('pointermove',function(e){
     return;}
   if(active.view==='edit'&&ptrs.size===1){
     if(Sculpt.painting&&Sculpt.ptId===e.pointerId){Sculpt.move(e);invalidate();return;}
+    if(editBox.active&&editBox.ptId===e.pointerId){showSelBox(editBox.x0,editBox.y0,e.clientX,e.clientY);clickStart=null;invalidate();return;}
     if(editDirect.ptId===e.pointerId){
       if(!editDirect.active&&editDirect.pending&&Math.hypot(e.clientX-editDirect.startX,e.clientY-editDirect.startY)>5){
         editDirect.active=true;editDirect.pending=false;
@@ -492,6 +497,12 @@ dom.addEventListener('pointermove',function(e){
 function endPtr(e){
   if(gizmoDrag===e.pointerId){Gizmo.end();gizmoDrag=null;invalidate();return;}
   if(active.view==='edit'&&Sculpt.painting&&Sculpt.ptId===e.pointerId){Sculpt.up();}
+  if(active.view==='edit'&&editBox.active&&editBox.ptId===e.pointerId){
+    hideSelBox();var r=dom.getBoundingClientRect();
+    if(Math.hypot(e.clientX-editBox.x0,e.clientY-editBox.y0)<5){onViewportTap(e);} // tiny box = plain tap
+    else{if(editState.boxSel!==2&&!editState.multiSel&&!e.shiftKey)EM.clearSel();
+      EM.boxSelect(editBox.x0-r.left,editBox.y0-r.top,e.clientX-r.left,e.clientY-r.top,active.vs.cam,r.width,r.height,editState.boxSel===2);}
+    editBox.active=false;editBox.ptId=null;clickStart=null;ptrs.delete(e.pointerId);invalidate();return;}
   if(active.view==='edit'&&editDirect.ptId===e.pointerId){
     if(editDirect.active){
       // Snap (top-bar Snap toggle): see applyEditSnap
@@ -1360,7 +1371,7 @@ function onViewportTap(e){var slot=curSlot();if(!slot)return;var r=dom.getBoundi
    MESH EDIT MODE
    ═══════════════════════════════════════════════════════ */
 
-var editState={mode:'face',tool:'select',grabActive:false,grabPtId:null,grabPrevX:0,grabPrevY:0,grabSnap:null,multiSel:false,hudExpanded:false,prop:false,propR:.8,mirror:false,mirrorAxis:0};
+var editState={mode:'face',tool:'select',grabActive:false,grabPtId:null,grabPrevX:0,grabPrevY:0,grabSnap:null,multiSel:false,hudExpanded:false,prop:false,propR:.8,mirror:false,mirrorAxis:0,boxSel:0,extrudeAmt:.3,insetAmt:.22};
 
 function screenDeltaToWorld(dx,dy){
   var cam=active.vs.cam,rad=active.vs.rad;
@@ -1372,6 +1383,12 @@ function screenDeltaToWorld(dx,dy){
 function distSeg2D(px,py,ax,ay,bx,by){var dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;if(!l2)return Math.hypot(px-ax,py-ay);var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l2));return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));}
 
 var editDirect={ptId:null,pending:false,active:false,startX:0,startY:0,prevX:0,prevY:0,snap:null};
+var editBox={active:false,ptId:null,x0:0,y0:0};
+function showSelBox(x0,y0,x1,y1){var el=$('#selBox');if(!el)return;el.style.display='block';
+  el.style.left=Math.min(x0,x1)+'px';el.style.top=Math.min(y0,y1)+'px';el.style.width=Math.abs(x1-x0)+'px';el.style.height=Math.abs(y1-y0)+'px';
+  el.style.borderColor=editState.boxSel===2?'rgba(120,190,255,.9)':'rgba(255,143,177,.9)';
+  el.style.background=editState.boxSel===2?'rgba(120,190,255,.14)':'rgba(255,143,177,.14)';}
+function hideSelBox(){var el=$('#selBox');if(el)el.style.display='none';}
 
 // Applied on drag-release when the top-bar Snap toggle is on: each vertex the drag moved
 // first tries to snap onto a nearby *stationary* vertex (closing gaps exactly, Blender-style
@@ -1626,9 +1643,11 @@ var EM={
     // Texture the live edit mesh (per-vertex UVs carried in _fromGeo) so the artist
     // sees the wrapping deform while sculpting; slight transparency keeps depth readable.
     var mt=this._mat;
-    if(EM._srcTex){mt.map=EM._srcTex;mt.color.setHex(0xffffff);mt.transparent=true;mt.opacity=.92;}
-    else{mt.map=null;mt.color.setHex(0xbba898);mt.transparent=false;mt.opacity=1;}
-    mt.needsUpdate=true;
+    // Solid (opaque) so it reads as a real surface — a translucent skeleton made it hard to
+    // tell front from back and let taps fall through onto the far side of the mesh.
+    if(EM._srcTex){mt.map=EM._srcTex;mt.color.setHex(0xffffff);}
+    else{mt.map=null;mt.color.setHex(0xbba898);}
+    mt.transparent=false;mt.opacity=1;mt.needsUpdate=true;
     this._fromGeo(pt.mesh.geometry);},
 
   _fromGeo:function(geo){
@@ -1677,21 +1696,24 @@ var EM={
       this._mirrorObj.scale.set(1,1,1);this._mirrorObj.scale.setComponent(editState.mirrorAxis,-1);
     }else if(this._mirrorObj){editScene.remove(this._mirrorObj);this._mirrorObj=null;}
 
-    // Edges
-    if(this._edgeObj){editScene.remove(this._edgeObj);this._edgeObj.geometry.dispose();}
-    var ep=[],ec=[];
-    for(var i=0;i<this.E.length;i++){var e=this.E[i],va=this.V[e.a],vb=this.V[e.b];ep.push(va.x,va.y,va.z,vb.x,vb.y,vb.z);var c=e.sel?[1,.56,.7]:[.32,.28,.24];ec.push(c[0],c[1],c[2],c[0],c[1],c[2]);}
-    var eg=new THREE.BufferGeometry();eg.setAttribute('position',new THREE.Float32BufferAttribute(ep,3));eg.setAttribute('color',new THREE.Float32BufferAttribute(ec,3));
-    this._edgeObj=new THREE.LineSegments(eg,new THREE.LineBasicMaterial({vertexColors:true,depthTest:false,transparent:true,opacity:.75}));
-    this._edgeObj.renderOrder=9;editScene.add(this._edgeObj);
+    // Edges — only the SELECTED ones are drawn (a full grey wireframe buried the actual
+    // surface and made holes impossible to spot on dense meshes). Highlights use depthTest
+    // false so the current selection stays visible even through the now-solid mesh.
+    if(this._edgeObj){editScene.remove(this._edgeObj);this._edgeObj.geometry.dispose();this._edgeObj=null;}
+    var ep=[];
+    for(var i=0;i<this.E.length;i++){var e=this.E[i];if(!e.sel)continue;var va=this.V[e.a],vb=this.V[e.b];ep.push(va.x,va.y,va.z,vb.x,vb.y,vb.z);}
+    if(ep.length){var eg=new THREE.BufferGeometry();eg.setAttribute('position',new THREE.Float32BufferAttribute(ep,3));
+      this._edgeObj=new THREE.LineSegments(eg,new THREE.LineBasicMaterial({color:0xff8fb1,depthTest:false,transparent:true,opacity:.95}));
+      this._edgeObj.renderOrder=9;editScene.add(this._edgeObj);}
 
-    // Verts
-    if(this._vertObj){editScene.remove(this._vertObj);this._vertObj.geometry.dispose();}
-    var vp=[],vc=[];
-    for(var i=0;i<this.V.length;i++){vp.push(this.V[i].x,this.V[i].y,this.V[i].z);vc.push(this.V[i].sel?1:.45,this.V[i].sel?.56:.42,this.V[i].sel?.7:.4);}
-    var vg=new THREE.BufferGeometry();vg.setAttribute('position',new THREE.Float32BufferAttribute(vp,3));vg.setAttribute('color',new THREE.Float32BufferAttribute(vc,3));
-    this._vertObj=new THREE.Points(vg,new THREE.PointsMaterial({vertexColors:true,size:8,sizeAttenuation:false,depthTest:false,transparent:true,opacity:.9}));
-    this._vertObj.renderOrder=10;editScene.add(this._vertObj);
+    // Verts — likewise only the SELECTED ones (plus, in Vert mode, a small cue set so the
+    // artist can tell they're in vertex mode without the whole mesh being speckled).
+    if(this._vertObj){editScene.remove(this._vertObj);this._vertObj.geometry.dispose();this._vertObj=null;}
+    var vp=[];
+    for(var i=0;i<this.V.length;i++){if(!this.V[i].sel)continue;vp.push(this.V[i].x,this.V[i].y,this.V[i].z);}
+    if(vp.length){var vg=new THREE.BufferGeometry();vg.setAttribute('position',new THREE.Float32BufferAttribute(vp,3));
+      this._vertObj=new THREE.Points(vg,new THREE.PointsMaterial({color:0xff6fa3,size:11,sizeAttenuation:false,depthTest:false,transparent:true,opacity:.95}));
+      this._vertObj.renderOrder=10;editScene.add(this._vertObj);}
 
     // Selected face highlight
     if(this._selObj){editScene.remove(this._selObj);this._selObj.geometry.dispose();this._selObj=null;}
@@ -1721,23 +1743,49 @@ var EM={
   select:function(ray,sx,sy,cam,W,H,add){
     var mode=editState.mode;
     if(!add)this.clearSel();
-    if(mode==='face'){var fi=this._pickFace(ray);if(fi>=0)this.F[fi].sel=add?!this.F[fi].sel:true;}
-    else if(mode==='vert'){var vi=this._pickVert(sx,sy,cam,W,H);if(vi>=0)this.V[vi].sel=add?!this.V[vi].sel:true;}
-    else{var ei=this._pickEdge(sx,sy,cam,W,H);if(ei>=0)this.E[ei].sel=add?!this.E[ei].sel:true;}
+    // Raycast the solid mesh once to find the FRONT surface under the tap; vert/edge picking
+    // then ignores anything behind it so taps land on the near side, not the far wall.
+    var hit=this._meshObj?ray.intersectObject(this._meshObj,false)[0]:null;
+    if(mode==='face'){var fi=(hit&&hit.faceIndex>=0&&this._triMap[hit.faceIndex]!=null)?this._triMap[hit.faceIndex]:-1;if(fi>=0)this.F[fi].sel=add?!this.F[fi].sel:true;}
+    else if(mode==='vert'){var vi=this._pickVert(sx,sy,cam,W,H,hit);if(vi>=0)this.V[vi].sel=add?!this.V[vi].sel:true;}
+    else{var ei=this._pickEdge(sx,sy,cam,W,H,hit);if(ei>=0)this.E[ei].sel=add?!this.E[ei].sel:true;}
     this._refresh();renderPanel();},
 
-  _pickFace:function(ray){
-    if(!this._meshObj)return -1;var hits=ray.intersectObject(this._meshObj,false);
-    if(!hits.length)return -1;var fi=hits[0].faceIndex;return(fi>=0&&this._triMap[fi]!=null)?this._triMap[fi]:-1;},
+  // Rectangular drag-select in canvas pixels. sub=true removes from the selection instead of
+  // adding. Only front-facing elements are affected (an element counts as front if it belongs
+  // to a face whose normal points toward the camera) so the box can't reach through to the
+  // far side of the solid mesh.
+  boxSelect:function(x0,y0,x1,y1,cam,W,H,sub){
+    var self=this,mode=editState.mode,val=!sub;
+    var minx=Math.min(x0,x1),maxx=Math.max(x0,x1),miny=Math.min(y0,y1),maxy=Math.max(y0,y1);
+    function scr(v){var p=v.clone().project(cam);return {x:(p.x+1)/2*W,y:(-p.y+1)/2*H,z:p.z};}
+    function inBox(s){return s.z<=1&&s.x>=minx&&s.x<=maxx&&s.y>=miny&&s.y<=maxy;}
+    var cp=cam.position,front=this.F.map(function(f,fi){var n=self._faceNormal(fi),c=self._faceCenter(fi);return n.dot(cp.clone().sub(c))>0;});
+    if(mode==='face'){this.F.forEach(function(f,fi){if(front[fi]&&inBox(scr(self._faceCenter(fi))))f.sel=val;});}
+    else if(mode==='vert'){var vf=new Array(this.V.length);this.F.forEach(function(f,fi){if(front[fi])f.vi.forEach(function(vi){vf[vi]=true;});});
+      this.V.forEach(function(v,i){if(vf[i]&&inBox(scr(v)))v.sel=val;});}
+    else{var ef=new Array(this.E.length);this.E.forEach(function(e,i){e.fi.forEach(function(fi){if(front[fi])ef[i]=true;});});
+      this.E.forEach(function(e,i){if(!ef[i])return;var sa=scr(self.V[e.a]),sb=scr(self.V[e.b]);
+        if(inBox({x:(sa.x+sb.x)/2,y:(sa.y+sb.y)/2,z:Math.min(sa.z,sb.z)})||(inBox(sa)&&inBox(sb)))e.sel=val;});}
+    this._refresh();renderPanel();},
 
-  _pickVert:function(sx,sy,cam,W,H){
-    var best=-1,bestD=44;
-    for(var i=0;i<this.V.length;i++){var p=this.V[i].clone().project(cam);if(p.z>1)continue;var d=Math.hypot((p.x+1)/2*W-sx,(-p.y+1)/2*H-sy);if(d<bestD){bestD=d;best=i;}}
+  // Distance beyond which a vertex counts as "behind the front surface" (occluded). Verts of
+  // the hit face sit at ~hit.distance; the far side is ~2·radius away, so half a radius of
+  // slack keeps the near surface pickable while rejecting the back.
+  _frontTol:function(hit){if(!hit)return Infinity;var g=this._meshObj.geometry;if(!g.boundingSphere)g.computeBoundingSphere();
+    return hit.distance+(g.boundingSphere?g.boundingSphere.radius*0.5:0.5);},
+
+  _pickVert:function(sx,sy,cam,W,H,hit){
+    var best=-1,bestD=44,tol=this._frontTol(hit),cp=cam.position;
+    for(var i=0;i<this.V.length;i++){var v=this.V[i];if(hit&&cp.distanceTo(v)>tol)continue;
+      var p=v.clone().project(cam);if(p.z>1)continue;var d=Math.hypot((p.x+1)/2*W-sx,(-p.y+1)/2*H-sy);if(d<bestD){bestD=d;best=i;}}
     return best;},
 
-  _pickEdge:function(sx,sy,cam,W,H){
-    var best=-1,bestD=32;
-    for(var i=0;i<this.E.length;i++){var e=this.E[i];var pa=this.V[e.a].clone().project(cam),pb=this.V[e.b].clone().project(cam);if(pa.z>1&&pb.z>1)continue;
+  _pickEdge:function(sx,sy,cam,W,H,hit){
+    var best=-1,bestD=32,tol=this._frontTol(hit),cp=cam.position;
+    for(var i=0;i<this.E.length;i++){var e=this.E[i];
+      if(hit&&Math.min(cp.distanceTo(this.V[e.a]),cp.distanceTo(this.V[e.b]))>tol)continue;
+      var pa=this.V[e.a].clone().project(cam),pb=this.V[e.b].clone().project(cam);if(pa.z>1&&pb.z>1)continue;
       var d=distSeg2D(sx,sy,(pa.x+1)/2*W,(-pa.y+1)/2*H,(pb.x+1)/2*W,(-pb.y+1)/2*H);if(d<bestD){bestD=d;best=i;}}
     return best;},
 
@@ -1825,24 +1873,50 @@ var EM={
     var snap=this.V.map(function(v){return v.clone();}),c=this._selCentroid(set),ax=new THREE.Vector3(axis==='x'?1:0,axis==='y'?1:0,axis==='z'?1:0);
     set.forEach(function(i){var p=this.V[i].clone().sub(c);p.applyAxisAngle(ax,ang);this.V[i].copy(p.add(c));},this);this._refresh();this._pushVertHistory(snap);},
 
-  extrude:function(){
+  // dist defaults to editState.extrudeAmt; a negative distance embosses (pushes the faces
+  // inward instead of out). The new cap faces stay selected so a drag, the amount slider, or
+  // Push ±N can fine-tune the depth afterwards.
+  extrude:function(dist){
     var self=this,selF=this.F.filter(function(f){return f.sel;});
     if(!selF.length){toast('Select face(s) first (Face mode)');return;}
+    dist=(dist==null?editState.extrudeAmt:dist);
     var _b=this._topoSnapshot();
-    selF.forEach(function(f){
-      var fi=self.F.indexOf(f),n=self._faceNormal(fi),dist=0.3,vMap={};
-      f.vi.forEach(function(vi){if(vMap[vi]===undefined){var nv=self.V[vi].clone().addScaledVector(n,dist);nv.sel=false;self._uvMix(nv,vi,vi,0);self.V.push(nv);vMap[vi]=self.V.length-1;}});
-      for(var i=0;i<f.vi.length;i++){var a=f.vi[i],b=f.vi[(i+1)%f.vi.length];self.F.push({vi:[a,b,vMap[b],vMap[a]],sel:false});}
-      f.vi=f.vi.map(function(vi){return vMap[vi];});f.sel=true;});
+    // Region extrude: lift each selected vertex ONCE (shared across all selected faces, along
+    // the average of its selected faces' normals), so an adjacent group stays one connected
+    // block instead of splitting into per-face pillars. Side walls are built only on the
+    // region BOUNDARY (edges used by a single selected face); interior shared edges get none.
+    var selVN={},order=[];
+    selF.forEach(function(f){var n=self._faceNormal(self.F.indexOf(f));f.vi.forEach(function(vi){if(!selVN[vi]){selVN[vi]=new THREE.Vector3();order.push(vi);}selVN[vi].add(n);});});
+    var vMap={};
+    order.forEach(function(vi){var n=selVN[vi].clone();if(n.lengthSq()<1e-12)n.set(0,1,0);else n.normalize();
+      var nv=self.V[vi].clone().addScaledVector(n,dist);nv.sel=false;self._uvMix(nv,vi,vi,0);self.V.push(nv);vMap[vi]=self.V.length-1;});
+    var ec={};function ek(a,b){return Math.min(a,b)+'_'+Math.max(a,b);}
+    selF.forEach(function(f){for(var i=0;i<f.vi.length;i++){var k=ek(f.vi[i],f.vi[(i+1)%f.vi.length]);ec[k]=(ec[k]||0)+1;}});
+    selF.forEach(function(f){for(var i=0;i<f.vi.length;i++){var a=f.vi[i],b=f.vi[(i+1)%f.vi.length];
+      if(ec[ek(a,b)]===1)self.F.push({vi:[a,b,vMap[b],vMap[a]],sel:false});}});
+    selF.forEach(function(f){f.vi=f.vi.map(function(vi){return vMap[vi];});f.sel=true;});
     this._buildEdges();this._refresh();this._pushTopo(_b);
-    renderPanel();toast('Extruded — drag the new faces to reposition');},
+    renderPanel();toast((dist<0?'Embossed':'Extruded')+' '+Math.abs(dist).toFixed(2)+' — drag or use Push ±');},
 
-  inset:function(){
+  // Move the selected faces along their averaged normal by dist (no new geometry) — the precise
+  // way to deepen or pull back an extrusion after the fact.
+  pushSel:function(dist){
+    var self=this,selF=this.F.filter(function(f){return f.sel;}),set=this._selVertSet();
+    if(!set.size){toast('Select face(s) first');return;}
+    var n=new THREE.Vector3();
+    if(selF.length){selF.forEach(function(f){n.add(self._faceNormal(self.F.indexOf(f)));});n.normalize();}
+    else n.set(0,1,0);
+    var snap=this.V.map(function(v){return v.clone();});
+    set.forEach(function(i){this.V[i].addScaledVector(n,dist);},this);
+    this._refresh();this._pushVertHistory(snap);toast('Pushed '+dist.toFixed(2));},
+
+  inset:function(amt){
     var self=this,selF=this.F.filter(function(f){return f.sel;});
     if(!selF.length){toast('Select face(s) first (Face mode)');return;}
+    amt=(amt==null?editState.insetAmt:amt);
     var _b=this._topoSnapshot();
     selF.forEach(function(f){
-      var fi=self.F.indexOf(f),c=self._faceCenter(fi),amt=0.22,newVi=f.vi.map(function(vi){var nv=self.V[vi].clone().lerp(c,amt);nv.sel=false;self._uvMix(nv,vi,vi,0);self.V.push(nv);return self.V.length-1;});
+      var fi=self.F.indexOf(f),c=self._faceCenter(fi),newVi=f.vi.map(function(vi){var nv=self.V[vi].clone().lerp(c,amt);nv.sel=false;self._uvMix(nv,vi,vi,0);self.V.push(nv);return self.V.length-1;});
       for(var i=0;i<f.vi.length;i++){var a=f.vi[i],b=f.vi[(i+1)%f.vi.length];self.F.push({vi:[a,b,newVi[(i+1)%newVi.length],newVi[i]],sel:false});}
       f.vi=newVi;f.sel=true;});
     this._buildEdges();this._refresh();this._pushTopo(_b);renderPanel();},
@@ -2374,6 +2448,11 @@ function cycleMirror(){var es=editState;
   EM._mirMap=null;EM._refresh();renderEditHud();renderPanel();
   toast(es.mirror?'Mirror '+'XYZ'[es.mirrorAxis]+' — the other half mirrors live':'Mirror off');}
 function mirrorBtnLabel(){return editState.mirror?'Mir '+'XYZ'[editState.mirrorAxis]:'Mirror';}
+// Drag box-select cycles Off → Add (+) → Subtract (−). While on, dragging the viewport draws
+// a selection rectangle instead of moving the selection; orbit stays on the RotBall gizmo.
+function cycleBoxSel(){editState.boxSel=(editState.boxSel+1)%3;if(editState.boxSel)editState.tool='select';
+  renderEditHud();renderPanel();toast(editState.boxSel===1?'Box select — drag to add':(editState.boxSel===2?'Box select — drag to remove':'Box select off'));}
+function boxSelBtnLabel(){return editState.boxSel===1?'Box +':(editState.boxSel===2?'Box −':'Box');}
 function renderEditHud(){
   var hud=$('#editHud');if(!hud)return;
   hud.innerHTML='';
@@ -2395,6 +2474,7 @@ function renderEditHud(){
       ['face','vert','edge'].forEach(function(m){
         r1.appendChild(el('button',{class:'hud-btn'+(mode===m?' on':''),text:m[0].toUpperCase()+m.slice(1),onclick:function(){editState.mode=m;EM.clearSel();EM._refresh();renderPanel();}}));});
       r1.appendChild(el('button',{class:'hud-btn'+(editState.multiSel?' on':''),title:'Multi-select: tap to add to selection',text:'Multi',onclick:function(){editState.multiSel=!editState.multiSel;renderEditHud();}}));
+      r1.appendChild(el('button',{class:'hud-btn'+(editState.boxSel?' on':''),title:'Drag box-select: Off → Add → Remove',text:boxSelBtnLabel(),onclick:cycleBoxSel}));
     }
     r1.appendChild(el('button',{class:'hud-btn'+(editState.hudExpanded?' on':''),text:'···',onclick:function(){editState.hudExpanded=!editState.hudExpanded;renderEditHud();}}));
     hud.appendChild(r1);
@@ -2420,7 +2500,7 @@ function renderEditHud(){
         if(editState.mirror)mr2.appendChild(el('button',{class:'hud-btn',title:'Bake the mirrored half into real geometry',text:'Apply Mirror',onclick:function(){EM.applyMirror();}}));
         if(selN>0){
           mr2.appendChild(el('button',{class:'hud-btn',title:'Grow to the whole connected island',text:'Linked',onclick:function(){EM.selectLinked();}}));
-          if(mode==='face'){mr2.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Dup',onclick:function(){EM.duplicateSelection();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Separate',onclick:function(){EM.separateSelection();}}));}
+          if(mode==='face'){mr2.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));mr2.appendChild(el('button',{class:'hud-btn',title:'Extrude inward',text:'Emboss',onclick:function(){EM.extrude(-editState.extrudeAmt);}}));mr2.appendChild(el('button',{class:'hud-btn',title:'Push faces out along normal',text:'Push+',onclick:function(){EM.pushSel(editState.extrudeAmt*.5);}}));mr2.appendChild(el('button',{class:'hud-btn',title:'Push faces in along normal',text:'Push−',onclick:function(){EM.pushSel(-editState.extrudeAmt*.5);}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Dup',onclick:function(){EM.duplicateSelection();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Separate',onclick:function(){EM.separateSelection();}}));}
           if(mode==='vert'){mr2.appendChild(el('button',{class:'hud-btn',text:'Merge',onclick:function(){EM.mergeSelected();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Smooth',onclick:function(){EM.smoothVerts();renderPanel();}}));}
           if(mode==='edge'){mr2.appendChild(el('button',{class:'hud-btn',text:'Loop',onclick:function(){EM.selectLoops();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Bevel',onclick:function(){EM.bevelEdges();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Bridge',onclick:function(){EM.bridgeEdges();renderPanel();}}));mr2.appendChild(el('button',{class:'hud-btn',title:'Cap a whole boundary loop with one face',text:'Fill',onclick:function(){EM.fillHole();}}));}
           mr2.appendChild(el('button',{class:'hud-btn',text:'Subdiv',onclick:function(){EM.subdivide();renderPanel();}}));
@@ -2480,6 +2560,7 @@ function renderEditHud(){
   mr.appendChild(el('button',{class:'hud-btn',text:'All',onclick:function(){EM.selAll();}}));
   mr.appendChild(el('button',{class:'hud-btn',text:'None',onclick:function(){EM.clearSel();EM._refresh();renderPanel();}}));
   mr.appendChild(el('button',{class:'hud-btn'+(editState.multiSel?' on':''),title:'Multi-select (additive tap)',text:'Multi',onclick:function(){editState.multiSel=!editState.multiSel;renderEditHud();}}));
+  mr.appendChild(el('button',{class:'hud-btn'+(editState.boxSel?' on':''),title:'Drag box-select: Off → Add → Remove',text:boxSelBtnLabel(),onclick:cycleBoxSel}));
   mr.appendChild(el('button',{class:'hud-btn'+(editState.prop?' on':''),title:'Proportional edit (soft falloff)',text:'Soft',onclick:function(){editState.prop=!editState.prop;EM._propW=null;renderEditHud();renderPanel();}}));
   mr.appendChild(el('button',{class:'hud-btn'+(editState.mirror?' on':''),title:'Cycle mirror axis: Off → X → Y → Z',text:mirrorBtnLabel(),onclick:cycleMirror}));
   if(editState.mirror)mr.appendChild(el('button',{class:'hud-btn',title:'Bake the mirrored half into real geometry',text:'Apply Mirror',onclick:function(){EM.applyMirror();}}));
@@ -2490,6 +2571,9 @@ function renderEditHud(){
     or.appendChild(el('button',{class:'hud-btn',title:'Grow to the whole connected island',text:'Linked',onclick:function(){EM.selectLinked();}}));
     if(mode==='face'){
       or.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));
+      or.appendChild(el('button',{class:'hud-btn',title:'Extrude inward',text:'Emboss',onclick:function(){EM.extrude(-editState.extrudeAmt);}}));
+      or.appendChild(el('button',{class:'hud-btn',title:'Push faces out along normal',text:'Push+',onclick:function(){EM.pushSel(editState.extrudeAmt*.5);}}));
+      or.appendChild(el('button',{class:'hud-btn',title:'Push faces in along normal',text:'Push−',onclick:function(){EM.pushSel(-editState.extrudeAmt*.5);}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Dup',onclick:function(){EM.duplicateSelection();}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Separate',onclick:function(){EM.separateSelection();}}));
@@ -2594,9 +2678,18 @@ function panelEdit(b){
     text:'Apply Mirror '+'XYZ'[editState.mirrorAxis]+' (bake + weld)',onclick:function(){EM.applyMirror();}}));
 
   b.appendChild(el('div',{class:'section-title',text:'Operations'}));
+  b.appendChild(slider('Extrude / inset amount',.02,1.5,editState.extrudeAmt,.01,function(x){editState.extrudeAmt=x;editState.insetAmt=Math.min(.48,x*.6);}));
   b.appendChild(el('div',{class:'grid2'},[
-    el('button',{text:'Extrude  [E]',onclick:function(){EM.extrude();}}),
-    el('button',{text:'Inset Face  [I]',onclick:function(){EM.inset();}})
+    el('button',{text:'Extrude Out  [E]',title:'Push selected faces outward by the amount above',onclick:function(){EM.extrude(editState.extrudeAmt);}}),
+    el('button',{text:'Emboss (In)',title:'Push selected faces inward by the amount above',onclick:function(){EM.extrude(-editState.extrudeAmt);}})
+  ]));
+  b.appendChild(el('div',{class:'grid2',style:'margin-top:6px'},[
+    el('button',{text:'Push +  ▲',title:'Nudge the selected faces out along their normal (adjust an extrusion after the fact)',onclick:function(){EM.pushSel(editState.extrudeAmt*.5);}}),
+    el('button',{text:'Push −  ▼',title:'Nudge the selected faces inward — pull an extrusion back in',onclick:function(){EM.pushSel(-editState.extrudeAmt*.5);}})
+  ]));
+  b.appendChild(el('div',{class:'grid2',style:'margin-top:6px'},[
+    el('button',{text:'Inset Face  [I]',onclick:function(){EM.inset();}}),
+    el('button',{text:'Shrink −',title:'Scale the selection down about its center',onclick:function(){EM.scaleSelection(.85);}})
   ]));
   b.appendChild(el('div',{class:'grid2',style:'margin-top:6px'},[
     el('button',{text:'Subdivide  [S]',onclick:function(){EM.subdivide();renderPanel();}}),
@@ -2631,7 +2724,7 @@ function panelEdit(b){
 
   b.appendChild(el('hr',{class:'sep'}));
   b.appendChild(el('div',{class:'section-title',text:'Keyboard shortcuts (desktop)'}));
-  b.appendChild(el('p',{class:'small muted',text:'E=Extrude  I=Inset  S=Subdivide  B=Bevel  L=Loop Select  N=Recalc Normals  D=Duplicate  X=Delete  A=Select All  drag selected → move  6=Open this tab'}));
+  b.appendChild(el('p',{class:'small muted',text:'E=Extrude  I=Inset  S=Subdivide  B=Bevel  L=Loop Select  N=Recalc Normals  D=Duplicate  X=Delete  A=Select All  M=Multi-select  drag selected → move  6=Open this tab'}));
 
   b.appendChild(el('hr',{class:'sep'}));
   b.appendChild(el('div',{class:'section-title',text:'Export to library'}));
@@ -2694,6 +2787,7 @@ window.addEventListener('keydown',function(e){var tag=(e.target&&e.target.tagNam
     else if(z==='d'&&!e.ctrlKey&&!e.metaKey){e.preventDefault();EM.duplicateSelection();}
     else if(z==='x'){EM.deleteSelected();}
     else if(z==='s'&&!e.ctrlKey&&!e.metaKey){EM.subdivide();renderPanel();}
+    else if(z==='m'){editState.multiSel=!editState.multiSel;renderEditHud();renderPanel();toast('Multi-select '+(editState.multiSel?'on':'off'));}
   }});
 $('#fabBuild').addEventListener('click',function(){addPrim('Cube');openSheet(true);});
 $('#fabScene').addEventListener('click',function(){if(state.models.length){addPlacement(state.models[0].userData.id);openSheet(true);}else toast('No models yet');});
