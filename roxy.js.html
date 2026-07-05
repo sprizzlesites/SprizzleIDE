@@ -27,6 +27,8 @@ input[type=text],input[type=number],select{font-family:inherit;font-size:13px;co
   border:1px solid var(--line);border-radius:9px;padding:8px 9px;width:100%}
 input[type=color]{width:34px;height:30px;border:1px solid var(--line);border-radius:8px;background:none;padding:2px}
 label.fld{display:block;font-size:11px;letter-spacing:.04em;color:var(--muted);margin:0 0 5px}
+.tap-edit{cursor:pointer;border-bottom:1px dashed var(--faint);padding-bottom:1px}
+.tap-edit:hover{color:var(--ink);border-bottom-color:var(--pink)}
 .spread{display:flex;gap:8px;align-items:center}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px}
@@ -71,13 +73,19 @@ canvas{display:block;touch-action:none}
 #panel h2{font:600 13px/1.1 "Space Grotesk";margin:0 0 2px}
 #panel .sub{font-size:11.5px;color:var(--muted);margin:0 0 12px}
 .section-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:14px 0 8px}
+.sec-toggle{display:flex;align-items:center;cursor:pointer;user-select:none;padding:3px 0}
+.sec-toggle::after{content:'▾';margin-left:auto;font-size:10px;opacity:.55;transition:transform .16s}
+.sec-toggle.closed::after{transform:rotate(-90deg)}
 
 #tabbar{display:none}
+#navMask{display:none}
 #sheetHandle{display:none}
 
 .assets-body{position:absolute;inset:0;overflow:auto;padding:18px}
 .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:10px}
 .thumb{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.thumb-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid var(--line);
+  background:radial-gradient(120% 120% at 50% 20%,#2a2018 0%,#17110c 100%)}
 .thumb .nm{font-weight:600}.thumb .mt{font-size:11px;color:var(--muted)}
 .modlist{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .modrow{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px 10px}
@@ -100,6 +108,22 @@ canvas{display:block;touch-action:none}
 #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:99;
   font-size:14px;color:var(--muted);text-align:center;padding:24px}
 
+/* Base (desktop) sizing for the zoom knob — declared here, before the mobile
+   media query, so the mobile-only overrides for these same properties actually
+   win on mobile instead of losing to a same-specificity rule declared later. */
+#zoomKnob{position:absolute;right:18px;top:100px;display:none;flex-direction:column;align-items:center;gap:3px;z-index:8;width:28px;
+  padding:5px 0;border-radius:999px;background:rgba(26,20,14,.5);border:1px solid rgba(255,255,255,.12);
+  backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);
+  box-shadow:0 6px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.14)}
+.zk-btn{width:26px;height:26px;border-radius:50%;background:transparent;border:none;color:rgba(255,255,255,.85);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation;line-height:1;padding:0;font-family:inherit}
+#zkSlider{writing-mode:vertical-lr;direction:rtl;width:26px;height:80px;cursor:ns-resize;accent-color:rgba(255,143,177,.8);touch-action:none}
+/* Same reasoning: the mobile override only sets `bottom` (to clear the tabbar),
+   so the rest of this rule must come first or that override loses the cascade. */
+#paintHud{position:absolute;left:12px;bottom:14px;display:none;align-items:center;gap:9px;z-index:8;
+  padding:8px 11px;border-radius:16px;background:rgba(26,20,14,.55);border:1px solid rgba(255,255,255,.13);
+  backdrop-filter:blur(18px) saturate(1.6);-webkit-backdrop-filter:blur(18px) saturate(1.6);
+  box-shadow:0 6px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.14)}
+
 /* ---------- mobile ---------- */
 @media (max-width:820px){
   :root{--side:0px;--bar:52px}
@@ -107,14 +131,23 @@ canvas{display:block;touch-action:none}
   #rail{display:none}
   /* finger-sized touch targets */
   button{min-height:42px;font-size:13.5px}
-  #bar .act{min-height:38px;padding:8px 12px}
+  #bar{gap:6px;padding:0 8px}
+  #bar .vtitle{display:none} /* active tab in the dock already names the view */
+  #bar .act{min-height:38px;padding:8px 10px}
+  /* Below ~360px (iPhone SE 1st/2nd/3rd gen, some budget Android phones) the top bar's
+     logo + Undo/Redo/Snap/Frame/Shot no longer fit; #bar has no wrap/scroll, so the last
+     button silently clips off-screen with no way to reach it. Tighten spacing only at
+     this width rather than shrinking touch targets everywhere. */
   .chip{min-height:36px}
   .hud-btn{min-height:36px}
   input[type=text],input[type=number],select{min-height:42px;font-size:14px}
   input[type=color]{width:44px;height:38px}
   .zk-btn{width:32px;height:32px;min-height:32px;font-size:19px}
   #zoomKnob{width:34px}
-  #zkSlider{width:32px;height:96px}
+  /* Responsive slider length: caps at 96px on tall viewports, shrinks continuously
+     on short (landscape) ones so the knob (anchored below RotBall) never extends
+     down far enough to be covered by the tabbar, with a 32px usability floor. */
+  #zkSlider{width:32px;height:min(96px,max(24px,calc(100vh - 320px)))}
   .view[data-view=paint].on{grid-template-columns:1fr;grid-template-rows:1fr}
   .paint-prev{display:none}
   .view[data-view=paint].on.mode3d .paint-prev{display:block}
@@ -128,6 +161,13 @@ canvas{display:block;touch-action:none}
   #sheetHandle{display:flex;align-items:center;justify-content:center;gap:8px;height:38px;margin:-6px -14px 6px;cursor:grab;touch-action:none}
   #sheetHandle .bar{width:48px;height:5px;border-radius:99px;background:var(--faint)}
   #sheetHandle .lbl{font-size:11px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+  /* Covers the thin slivers around the tabbar (above/below it, within the panel's
+     reserved bottom offset) so the collapsed sheet's peek can never show real
+     content through them — the gap there is fixed-size regardless of viewport
+     height, but a short (landscape) viewport shrinks the panel enough that real
+     text lands in exactly that gap instead of blank space. */
+  #navMask{display:block;position:fixed;left:0;right:0;bottom:0;height:calc(78px + env(safe-area-inset-bottom));
+    background:var(--bg);z-index:25;pointer-events:none}
   #tabbar{display:flex;position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));height:62px;
     border:1px solid rgba(255,255,255,.13);border-radius:26px;padding:0 4px;
     background:linear-gradient(rgba(40,31,22,.58),rgba(20,15,11,.72));
@@ -142,8 +182,19 @@ canvas{display:block;touch-action:none}
   .toast{bottom:calc(86px + env(safe-area-inset-bottom))}
   #paintHud{bottom:calc(134px + env(safe-area-inset-bottom))}
 }
+@media (max-width:359px){
+  #bar{gap:3px;padding:0 6px}
+  #bar .logo{font-size:12px}
+  #bar .act{padding:8px 6px}
+}
 @media (max-width:820px){ .desktop-only{display:none} }
 @media (min-width:821px){ .mobile-only{display:none} }
+/* Respect the OS "reduce motion" setting: the bottom sheet's translateY slide and every
+   other transition snap to near-instant for vestibular-sensitive users. Default (motion
+   allowed) is untouched — this whole block is inert unless the user has opted in. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+}
 
 /* ---------- edit HUD ---------- */
 #editHud{position:absolute;left:0;right:0;bottom:16px;display:none;flex-direction:column;align-items:center;gap:8px;z-index:7;pointer-events:none}
@@ -164,23 +215,29 @@ canvas{display:block;touch-action:none}
 .hud-sval{font-size:11px;color:rgba(255,212,226,.85);min-width:30px;text-align:center;pointer-events:none}
 .hud-compact{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;justify-content:flex-start;max-width:100%;scrollbar-width:none}
 .hud-compact::-webkit-scrollbar{display:none}
-@media(max-width:820px){#editHud{top:8px;bottom:auto;gap:5px;left:0;right:90px;align-items:flex-start;padding-left:8px}.hud-btn{font-size:11px;padding:6px 10px}.hud-range{width:110px}}
+/* Only applied (via JS, once actual overflow is measured) to rows with more buttons than fit —
+   fades the trailing edge so it reads as "swipe for more" instead of looking like clipped layout.
+   The "..." HUD-expand toggle lives at the end of this row and was otherwise invisible off-screen. */
+.hud-compact.has-overflow{mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent 100%);
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent 100%)}
+/* right:98px clears RotBall (right:12px, 80px wide) with a real gap — it was 90px,
+   2px short of RotBall's own left edge, so the HUD row's fade-scroll edge touched the
+   orbit gizmo's circle instead of stopping cleanly before it. */
+@media(max-width:820px){#editHud{top:8px;bottom:auto;gap:5px;left:0;right:98px;align-items:flex-start;padding-left:8px}.hud-btn{font-size:11px;padding:6px 10px}.hud-range{width:110px}}
 #rotBall{position:absolute;right:12px;top:12px;width:80px;height:80px;cursor:grab;display:none;z-index:8;touch-action:none;border-radius:50%}
-#zoomKnob{position:absolute;right:18px;top:100px;display:none;flex-direction:column;align-items:center;gap:3px;z-index:8;width:28px;
-  padding:5px 0;border-radius:999px;background:rgba(26,20,14,.5);border:1px solid rgba(255,255,255,.12);
-  backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);
-  box-shadow:0 6px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.14)}
 #zoomKnob.on{display:flex}
-.zk-btn{width:26px;height:26px;border-radius:50%;background:transparent;border:none;color:rgba(255,255,255,.85);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation;line-height:1;padding:0;font-family:inherit}
-#zkSlider{writing-mode:vertical-lr;direction:rtl;width:26px;height:80px;cursor:ns-resize;accent-color:rgba(255,143,177,.8);touch-action:none}
-#paintHud{position:absolute;left:12px;bottom:14px;display:none;align-items:center;gap:9px;z-index:8;
-  padding:8px 11px;border-radius:16px;background:rgba(26,20,14,.55);border:1px solid rgba(255,255,255,.13);
-  backdrop-filter:blur(18px) saturate(1.6);-webkit-backdrop-filter:blur(18px) saturate(1.6);
-  box-shadow:0 6px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.14)}
 #paintHud.on{display:flex}
 #phColor{width:34px;height:32px;border:1px solid var(--line);border-radius:9px;background:none;padding:2px}
 #phSize{width:120px;touch-action:none}
-#phErase{font-size:12px;padding:8px 11px;min-height:0!important}
+#phErase,#phEyedrop{font-size:12px;padding:8px 11px;min-height:0!important}
+#hint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);max-width:88%;z-index:9;
+  padding:9px 14px;border-radius:999px;font-size:12px;color:rgba(255,236,244,.92);text-align:center;cursor:pointer;
+  background:rgba(26,20,14,.6);border:1px solid rgba(255,255,255,.14);
+  backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);
+  box-shadow:0 6px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.15);
+  opacity:0;pointer-events:none;transition:opacity .35s}
+#hint.show{opacity:1;pointer-events:auto}
+@media (max-width:820px){#hint{bottom:calc(134px + env(safe-area-inset-bottom))}}
 #quickUndo{display:none}
 @media (max-width:820px){
   #quickUndo{position:absolute;left:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;z-index:8}
@@ -216,11 +273,11 @@ canvas{display:block;touch-action:none}
       <div class="paint2d"><canvas id="paintCanvas" width="1024" height="1024"></canvas></div>
       <div class="paint-prev gl-slot" id="slot-paint"></div>
     </section>
-    <section class="view" data-view="build"><div class="gl-slot" id="slot-build"></div><button class="fab" id="fabBuild">+</button></section>
-    <section class="view" data-view="scene"><div class="gl-slot" id="slot-scene"></div><button class="fab" id="fabScene">+</button></section>
+    <section class="view" data-view="build"><div class="gl-slot" id="slot-build"></div><button class="fab" id="fabBuild" title="Add a cube" aria-label="Add a cube">+</button></section>
+    <section class="view" data-view="scene"><div class="gl-slot" id="slot-scene"></div><button class="fab" id="fabScene" title="Add a model to the scene" aria-label="Add a model to the scene">+</button></section>
     <section class="view" data-view="assets"><div class="assets-body" id="assetsBody"></div></section>
     <section class="view" data-view="edit"><div class="gl-slot" id="slot-edit"></div><div id="editHud"></div></section>
-    <canvas id="rotBall" width="80" height="80"></canvas>
+    <canvas id="rotBall" width="80" height="80" role="img" aria-label="Orbit gizmo — drag to rotate the view"></canvas>
     <div id="zoomKnob">
       <button class="zk-btn" id="zkIn" title="Zoom in">+</button>
       <input id="zkSlider" type="range" min="1" max="100" value="50">
@@ -230,11 +287,13 @@ canvas{display:block;touch-action:none}
       <input type="color" id="phColor" value="#d8466a" title="Brush color">
       <input type="range" id="phSize" min="4" max="120" step="1" value="38" title="Brush size">
       <button id="phErase" title="Eraser">Erase</button>
+      <button id="phEyedrop" title="Eyedropper: pick a color from the texture">⏺</button>
     </div>
     <div id="quickUndo">
       <button id="quUndo" title="Undo">↶</button>
       <button id="quRedo" title="Redo">↷</button>
     </div>
+    <div id="hint"></div>
   </main>
 
   <aside id="panel">
@@ -242,6 +301,7 @@ canvas{display:block;touch-action:none}
     <div id="panelBody"></div>
   </aside>
 
+  <div id="navMask"></div>
   <nav id="tabbar"></nav>
 </div>
 
@@ -354,7 +414,7 @@ var History={st:[],i:-1,lim:80,
  push:function(u,r){this.st=this.st.slice(0,this.i+1);this.st.push({u:u,r:r});if(this.st.length>this.lim)this.st.shift();this.i=this.st.length-1;updUndo();},
  undo:function(){if(this.i<0)return;this.st[this.i].u();this.i--;updUndo();afterHist();},
  redo:function(){if(this.i>=this.st.length-1)return;this.i++;this.st[this.i].r();updUndo();afterHist();}};
-function updUndo(){var u=$('#btnUndo'),r=$('#btnRedo');if(u)u.style.opacity=History.i>=0?1:.35;if(r)r.style.opacity=History.i<History.st.length-1?1:.35;
+function updUndo(){scheduleAutosave();var u=$('#btnUndo'),r=$('#btnRedo');if(u)u.style.opacity=History.i>=0?1:.35;if(r)r.style.opacity=History.i<History.st.length-1?1:.35;
   var qu=$('#quUndo'),qr=$('#quRedo');if(qu)qu.style.opacity=History.i>=0?1:.35;if(qr)qr.style.opacity=History.i<History.st.length-1?1:.35;}
 function afterHist(){renderPanel();if(active.view==='assets')renderAssets();invalidate();}
 
@@ -395,6 +455,7 @@ dom.addEventListener('pointerdown',function(e){
   dom.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   clickStart={x:e.clientX,y:e.clientY,t:Date.now(),id:e.pointerId};
   if(active.view==='paint'&&paint.mode3d&&ptrs.size===1){
+    if(paint.eyedrop){pickColorAt3D(e.clientX,e.clientY);return;}
     paint.drawing=true;paint.last=null;paint._last3d=null;paint._3dSnap=paint.ctx.getImageData(0,0,1024,1024);
     do3dPaint(e.clientX,e.clientY);}
   else if(active.view==='edit'&&ptrs.size===1){
@@ -433,6 +494,8 @@ function endPtr(e){
   if(active.view==='edit'&&Sculpt.painting&&Sculpt.ptId===e.pointerId){Sculpt.up();}
   if(active.view==='edit'&&editDirect.ptId===e.pointerId){
     if(editDirect.active){
+      // Snap (top-bar Snap toggle): see applyEditSnap
+      if(Gizmo.snap)applyEditSnap(editDirect.snap);
       var snap=editDirect.snap,curr=EM.V.map(function(v){return v.clone();});
       History.push(function(){EM.V.forEach(function(v,i){v.copy(snap[i]);});EM._refresh();},
                    function(){EM.V.forEach(function(v,i){v.copy(curr[i]);});EM._refresh();});}
@@ -454,6 +517,13 @@ dom.addEventListener('wheel',function(e){e.preventDefault();active.vs.rad=clamp(
 
 function updateCam(){var vs=active.vs,c=vs.cam,sp=Math.sin(vs.ph);
   c.position.set(vs.tx+vs.rad*sp*Math.cos(vs.th),vs.ty+vs.rad*Math.cos(vs.ph),vs.tz+vs.rad*sp*Math.sin(vs.th));c.lookAt(vs.tx,vs.ty,vs.tz);}
+
+// Snap orbit to a standard axis-aligned view (keeps target + zoom, only changes angle).
+// th/ph values match the drag handler's clamp range (ph 0.1-1.5) so a follow-up
+// orbit drag continues smoothly instead of jumping.
+var VIEW_SNAPS={front:{th:Math.PI/2,ph:1.5},back:{th:-Math.PI/2,ph:1.5},right:{th:0,ph:1.5},left:{th:Math.PI,ph:1.5},top:{ph:.1}};
+function snapView(name){var s=VIEW_SNAPS[name];if(!s)return;var vs=active.vs;
+  if(s.th!=null)vs.th=s.th;vs.ph=s.ph;updateCam();invalidate();}
 function resizeActive(){var slot=curSlot();if(!slot)return;var r=slot.getBoundingClientRect();if(r.width<2||r.height<2)return;
   renderer.setSize(r.width,r.height);active.vs.cam.aspect=r.width/r.height;active.vs.cam.updateProjectionMatrix();}
 function curSlot(){var v=active.view;if(v==='paint')return $('#slot-paint');return $('#slot-'+v);}
@@ -514,7 +584,51 @@ function applyModifiers(m){if(!m)return;
 function setActiveModel(id){state.activeId=id;var holder=viewerScene.userData.modelHolder;while(holder.children.length)holder.remove(holder.children[0]);
   var m=getModel(id);if(m){holder.add(m);frameObject(m,viewState.viewer);}invalidate();if(active.view==='viewer'||active.view==='paint')renderPanel();}
 function getModel(id){for(var i=0;i<state.models.length;i++)if(state.models[i].userData.id===id)return state.models[i];return null;}
-function addModel(m){state.models.push(m);return m;}
+function addModel(m){state.models.push(m);scheduleAutosave();return m;}
+function renameModel(m){
+  var nv=prompt('Rename model:',m.userData.name);if(nv==null)return;nv=nv.trim();if(!nv||nv===m.userData.name)return;
+  var old=m.userData.name;m.userData.name=nv;
+  renderAssets();renderPanel();scheduleAutosave();toast('Renamed to "'+nv+'"');
+  History.push(function(){m.userData.name=old;renderAssets();renderPanel();},
+               function(){m.userData.name=nv;renderAssets();renderPanel();});}
+function duplicateModel(m){
+  var parts=m.userData.parts.map(function(p){return {geo:p.mesh.geometry.clone(),mat:p.mat.clone(),_hasProperUVs:p._hasProperUVs};});
+  var name=m.userData.name+' Copy';
+  var nm=makeModel(name,parts);
+  addModel(nm);setActiveModel(nm.userData.id);toast('"'+name+'" duplicated');renderAssets();}
+// Frees GPU-side buffers for a deleted model. Safe to call even if something else still
+// renders the same objects: THREE's dispose() only drops the cached GPU upload — the
+// renderer transparently re-uploads from the intact CPU-side data next time it's drawn.
+// Still, avoid disposing textures known to be actively shared elsewhere:
+// - paint.tex is one long-lived canvas texture reused across every paint session
+// - EM._srcTex is whatever texture the mesh editor currently has loaded/exports
+// A model still placed in the Scene shares its geometry/material by reference with the
+// placement (Object3D.clone() doesn't deep-clone them), so skip it entirely — its
+// resources are still in active use there.
+function disposeModelResources(m){
+  var stillPlaced=sceneScene.userData.holder.children.some(function(c){return c.userData&&c.userData.placement&&c.userData.modelId===m.userData.id;});
+  if(stillPlaced)return;
+  m.userData.parts.forEach(function(p){
+    if(p.baseGeo&&p.baseGeo!==p.mesh.geometry)p.baseGeo.dispose();
+    if(p.mesh.geometry)p.mesh.geometry.dispose();
+    var mat=p.mat;if(!mat)return;
+    ['map','bumpMap','normalMap','roughnessMap','metalnessMap','emissiveMap'].forEach(function(k){
+      var t=mat[k];if(t&&t!==paint.tex&&t!==EM._srcTex)t.dispose();});
+    mat.dispose();});}
+function deleteModel(id){
+  var idx=state.models.findIndex(function(mm){return mm.userData.id===id;});if(idx<0)return;
+  var m=state.models[idx],wasActive=(state.activeId===id);
+  state.models.splice(idx,1);
+  if(wasActive){var next=state.models[0];state.activeId=next?next.userData.id:null;
+    if(next)setActiveModel(next.userData.id);
+    else{var holder=viewerScene.userData.modelHolder;while(holder.children.length)holder.remove(holder.children[0]);invalidate();}}
+  renderAssets();if(active.view==='viewer'||active.view==='paint')renderPanel();
+  toast('"'+m.userData.name+'" deleted');scheduleAutosave();
+  disposeModelResources(m);
+  History.push(function(){state.models.splice(idx,0,m);if(wasActive)setActiveModel(id);renderAssets();renderPanel();},
+    function(){var i2=state.models.findIndex(function(mm){return mm.userData.id===id;});if(i2>=0)state.models.splice(i2,1);
+      if(state.activeId===id){var nx=state.models[0];state.activeId=nx?nx.userData.id:null;if(nx)setActiveModel(nx.userData.id);}
+      renderAssets();renderPanel();disposeModelResources(m);});}
 
 function frameObject(obj,vs){var box=new THREE.Box3().setFromObject(obj);if(box.isEmpty())return;var s=new THREE.Vector3();box.getSize(s);
   var c=new THREE.Vector3();box.getCenter(c);var r=Math.max(s.x,s.y,s.z)*0.5||1;vs.tx=c.x;vs.ty=c.y;vs.tz=c.z;vs.rad=r*3.2;}
@@ -746,7 +860,7 @@ function exportOBJ(root,name){root.updateWorldMatrix(true,true);var rootInv=new 
   toast('Exported '+name+(texFiles.length?' + .mtl + texture png':''));}
 
 /* ---------------- paint ---------------- */
-var paint={cv:$('#paintCanvas'),ctx:null,part:0,color:'#d8466a',size:38,soft:0,erase:false,drawing:false,last:null,tex:null,mode3d:false,_3dSnap:null,_lastFaceIdx:-1,_last3d:null};
+var paint={cv:$('#paintCanvas'),ctx:null,part:0,color:'#d8466a',size:38,soft:0,erase:false,eyedrop:false,drawing:false,last:null,tex:null,mode3d:false,_3dSnap:null,_lastFaceIdx:-1,_last3d:null};
 paint.ctx=paint.cv.getContext('2d');
 function paintInit(){var m=getModel(state.activeId);var part=m&&m.userData.parts[paint.part];var mat=part&&part.mat;
   if(paint.tex&&mat&&mat.map===paint.tex){applyPaintTex();return;}
@@ -767,8 +881,29 @@ function paintPattern(kind){var c=paint.ctx,S=1024,before=c.getImageData(0,0,S,S
   var after=c.getImageData(0,0,S,S),tx=paint.tex;paint.tex.needsUpdate=true;invalidate();
   History.push(function(){c.putImageData(before,0,0);tx.needsUpdate=true;invalidate();},function(){c.putImageData(after,0,0);tx.needsUpdate=true;invalidate();});}
 function paintUV(x,y){var r=paint.cv.getBoundingClientRect();return {x:(x-r.left)/r.width*1024,y:(y-r.top)/r.height*1024};}
+
+/* ----- eyedropper: pick brush color from the texture, 2D canvas or 3D surface ----- */
+function setPaintColor(hex){
+  paint.color=hex;paint.erase=false;paint.eyedrop=false;
+  var col=$('#panelBody input[type=color]');if(col)col.value=hex;
+  syncPaintHud();toast('Picked '+hex);}
+function pickColorAt2D(x,y){
+  x=Math.max(0,Math.min(1023,Math.round(x)));y=Math.max(0,Math.min(1023,Math.round(y)));
+  var d=paint.ctx.getImageData(x,y,1,1).data;
+  setPaintColor('#'+('000000'+((d[0]<<16)|(d[1]<<8)|d[2]).toString(16)).slice(-6));}
+function pickColorAt3D(clientX,clientY){
+  var m=getModel(state.activeId);if(!m||!m.userData.parts[paint.part])return;
+  ensureAtlasUVs(m,paint.part); // keep UV space consistent with do3dPaint's atlas
+  var mesh=m.userData.parts[paint.part].mesh,cam=active.vs.cam,r=dom.getBoundingClientRect();
+  var ray=new THREE.Raycaster();
+  ray.setFromCamera({x:((clientX-r.left)/r.width)*2-1,y:-((clientY-r.top)/r.height)*2+1},cam);
+  var hits=ray.intersectObject(mesh,false);
+  if(!hits.length||!hits[0].uv)return;
+  pickColorAt2D(hits[0].uv.x*1024,(1-hits[0].uv.y)*1024);}
 (function bindPaint(){var c=paint.cv;var snap=null;
-  c.addEventListener('pointerdown',function(e){if(paint.mode3d)return;c.setPointerCapture(e.pointerId);paint.drawing=true;paint.last=null;snap=paint.ctx.getImageData(0,0,1024,1024);var u=paintUV(e.clientX,e.clientY);paintAt(u.x,u.y);});
+  c.addEventListener('pointerdown',function(e){if(paint.mode3d)return;var u=paintUV(e.clientX,e.clientY);
+    if(paint.eyedrop){pickColorAt2D(u.x,u.y);return;}
+    c.setPointerCapture(e.pointerId);paint.drawing=true;paint.last=null;snap=paint.ctx.getImageData(0,0,1024,1024);paintAt(u.x,u.y);});
   c.addEventListener('pointermove',function(e){if(paint.mode3d||!paint.drawing)return;var u=paintUV(e.clientX,e.clientY);paintAt(u.x,u.y);});
   function up(){if(!paint.drawing)return;paint.drawing=false;paint.last=null;if(snap){var before=snap,after=paint.ctx.getImageData(0,0,1024,1024);var tx=paint.tex;
     History.push(function(){paint.ctx.putImageData(before,0,0);tx.needsUpdate=true;invalidate();},function(){paint.ctx.putImageData(after,0,0);tx.needsUpdate=true;invalidate();});snap=null;}}
@@ -792,20 +927,68 @@ function setView(v){active.view=v;active.scene=(v==='build')?buildScene:(v==='sc
   var zk=$('#zoomKnob');if(zk)zk.classList.toggle('on',v==='paint'||v==='edit');
   syncPaintHud();
   var qu=$('#quickUndo');if(qu)qu.classList.toggle('off',v==='assets');
+  showHint(v);
   renderPanel();setTimeout(resizeActive,30);}
 
-function slider(label,min,max,val,step,on){var out=el('span',{class:'muted small',text:(+val).toFixed(2)});var startV=null;
+/* first-run gesture hints, one per view, persisted so they never nag */
+var HINTS={
+  viewer:'Drag to orbit · Pinch to zoom · Double-tap to frame',
+  build:'Tap a part to select · Drag the gizmo to move · Double-tap to frame',
+  scene:'Tap to select · Two-finger drag to pan · Double-tap to frame',
+  edit:'Tap to select · Drag selection to move · RotBall orbits · Double-tap to frame',
+  paint:'Paint the 2D canvas — or enable "Paint on 3D surface" in Tools'};
+var hintTimer=null;
+function showHint(v){var h=$('#hint');if(!h)return;
+  // Always clear a still-fading hint from whatever view we just left — otherwise its
+  // gesture text (e.g. edit's "drag selection to move") keeps showing, wrongly
+  // describing the view we switched to, until its own 6s timer happens to expire.
+  h.classList.remove('show');clearTimeout(hintTimer);
+  if(!HINTS[v])return;
+  var seen={};try{seen=JSON.parse(localStorage.getItem('roxyHints')||'{}');}catch(e){}
+  if(seen[v])return;
+  seen[v]=1;try{localStorage.setItem('roxyHints',JSON.stringify(seen));}catch(e){}
+  h.textContent=HINTS[v];h.classList.add('show');
+  hintTimer=setTimeout(function(){h.classList.remove('show');},6000);}
+$('#hint').addEventListener('click',function(){this.classList.remove('show');});
+
+function slider(label,min,max,val,step,on){var out=el('span',{class:'muted small tap-edit',text:(+val).toFixed(2),title:'Tap to enter an exact value'});var startV=null;
   var r=el('input',{type:'range',min:min,max:max,step:step||.01,value:val,
     onpointerdown:function(e){startV=+e.target.value;},
     oninput:function(e){out.textContent=(+e.target.value).toFixed(2);on(+e.target.value);invalidate();},
     onchange:function(e){var nv=+e.target.value,sv=startV==null?val:startV;if(nv!==sv){History.push(function(){on(sv);renderPanel();invalidate();},function(){on(nv);renderPanel();invalidate();});}startV=null;}});
+  out.addEventListener('click',function(){
+    var sv=+r.value,input=prompt(label.replace(/\s+$/,'')+' (range '+min+' to '+max+'):',sv);
+    if(input==null)return;var nv=+input;if(!isFinite(nv))return;
+    nv=Math.max(min,Math.min(max,nv));
+    r.value=nv;out.textContent=nv.toFixed(2);on(nv);invalidate();
+    if(nv!==sv)History.push(function(){r.value=sv;out.textContent=sv.toFixed(2);on(sv);renderPanel();invalidate();},
+                             function(){r.value=nv;out.textContent=nv.toFixed(2);on(nv);renderPanel();invalidate();});});
   return el('div',{},[el('label',{class:'fld'},[label+'  ',out]),r]);}
 
 function renderPanel(){var b=$('#panelBody');b.innerHTML='';var v=active.view;
   if(v==='viewer')panelViewer(b);else if(v==='paint')panelPaint(b);else if(v==='build')panelBuild(b);else if(v==='scene')panelScene(b);else if(v==='edit')panelEdit(b);else panelAssets(b);
+  makeCollapsible(b,v);
   $('#sheetLbl').textContent=$('#vtitle').textContent+' Tools';
   if(v==='build')Gizmo.attach(state.selBuild);else if(v==='scene')Gizmo.attach(state.selScene);else Gizmo.attach(null);
   updateStats();invalidate();}
+
+/* Section titles fold their content; collapse state survives re-renders (keyed per view+title) */
+var collapsedSec={};
+function makeCollapsible(b,v){
+  var kids=Array.prototype.slice.call(b.children);
+  kids.forEach(function(k,i){
+    if(!k.classList||!k.classList.contains('section-title'))return;
+    var group=[];
+    for(var j=i+1;j<kids.length;j++){var s=kids[j];
+      if(s.classList&&s.classList.contains('section-title'))break;
+      if(s.tagName==='HR')break;
+      group.push(s);}
+    if(!group.length)return;
+    var key=v+'|'+k.textContent;
+    k.classList.add('sec-toggle');
+    function apply(){var c=!!collapsedSec[key];k.classList.toggle('closed',c);group.forEach(function(g){g.style.display=c?'none':'';});}
+    k.addEventListener('click',function(){collapsedSec[key]=!collapsedSec[key];apply();});
+    apply();});}
 function updateStats(){var s=$('#stat');if(!s)return;var tri=0;active.scene.traverse(function(o){if(o.isMesh&&o.geometry){var g=o.geometry;tri+=g.index?g.index.count/3:(g.attributes.position?g.attributes.position.count/3:0);}});
   s.textContent=Math.round(tri).toLocaleString()+' tris';}
 
@@ -814,6 +997,10 @@ function panelViewer(b){var m=getModel(state.activeId);
   b.appendChild(el('h2',{text:'Model'}));b.appendChild(el('p',{class:'sub',text:m?m.userData.name:'No model'}));
   var sel=el('select',{onchange:function(e){setActiveModel(e.target.value);}});state.models.forEach(function(mm){sel.appendChild(el('option',{value:mm.userData.id,text:mm.userData.name}));});if(m)sel.value=m.userData.id;
   b.appendChild(el('label',{class:'fld',text:'Active model'}));b.appendChild(sel);
+  if(m)b.appendChild(el('div',{class:'grid2',style:'margin-top:8px'},[
+    el('button',{text:'Rename',onclick:function(){renameModel(m);}}),
+    el('button',{text:'Duplicate',onclick:function(){duplicateModel(m);}})]));
+  if(m)b.appendChild(el('button',{style:'width:100%;margin-top:6px',text:'Delete model',onclick:function(){deleteModel(m.userData.id);}}));
   b.appendChild(el('div',{class:'section-title',text:'Lighting / Environment'}));
   var ev=el('select',{onchange:function(e){applyEnv(viewerScene,e.target.value);}});ENVS.forEach(function(p){ev.appendChild(el('option',{value:p.id,text:p.name}));});ev.value=viewerScene.userData.envId;b.appendChild(ev);
   b.appendChild(el('div',{class:'section-title',text:'Material'}));
@@ -865,11 +1052,13 @@ function panelViewer(b){var m=getModel(state.activeId);
 /* ----- floating paint HUD (3D paint mode) ----- */
 function syncPaintHud(){var ph=$('#paintHud');if(!ph)return;
   var on=active.view==='paint'&&paint.mode3d;ph.classList.toggle('on',on);
-  if(on){$('#phColor').value=paint.color;$('#phSize').value=paint.size;$('#phErase').className=paint.erase?'on':'';}}
-(function(){var pc=$('#phColor'),ps=$('#phSize'),pe=$('#phErase');if(!pc)return;
+  if(on){$('#phColor').value=paint.color;$('#phSize').value=paint.size;$('#phErase').className=paint.erase?'on':'';
+    var pk=$('#phEyedrop');if(pk)pk.className=paint.eyedrop?'on':'';}}
+(function(){var pc=$('#phColor'),ps=$('#phSize'),pe=$('#phErase'),pk=$('#phEyedrop');if(!pc)return;
   pc.addEventListener('input',function(){paint.color=this.value;paint.erase=false;pe.className='';});
   ps.addEventListener('input',function(){paint.size=+this.value;});
   pe.addEventListener('click',function(){paint.erase=!paint.erase;this.className=paint.erase?'on':'';});
+  if(pk)pk.addEventListener('click',function(){paint.eyedrop=!paint.eyedrop;this.className=paint.eyedrop?'on':'';});
 })();
 
 /* ----- Paint panel ----- */
@@ -893,10 +1082,13 @@ function panelPaint(b){var m=getModel(state.activeId);b.appendChild(el('h2',{tex
   b.appendChild(slider('Brush size',2,160,paint.size,1,function(x){paint.size=x;syncPaintHud();}));
   b.appendChild(slider('Brush softness',0,1,paint.soft,.01,function(x){paint.soft=x;}));
   var erBtn=el('button',{text:'Eraser',onclick:function(){paint.erase=!paint.erase;updEr();}});function updEr(){erBtn.className=paint.erase?'on':'';syncPaintHud();}
-  b.appendChild(el('div',{class:'grid2'},[erBtn,el('button',{text:'Clear',onclick:function(){paint.ctx.globalCompositeOperation='source-over';paint.ctx.fillStyle='#ffffff';paint.ctx.fillRect(0,0,1024,1024);paint.tex.needsUpdate=true;}})]));
-  b.appendChild(el('div',{class:'grid2',style:'margin-top:8px'},[el('button',{text:'Fill color',onclick:function(){paint.ctx.globalCompositeOperation='source-over';paint.ctx.fillStyle=paint.color;paint.ctx.fillRect(0,0,1024,1024);paint.tex.needsUpdate=true;}}),
-    el('button',{text:'Noise fill',onclick:function(){var n=fbm(512,[{s:8,a:.5},{s:32,a:.4},{s:128,a:.3}]);paint.ctx.globalCompositeOperation='source-over';paint.ctx.drawImage(n,0,0,1024,1024);paint.tex.needsUpdate=true;}})]));
-  b.appendChild(el('div',{class:'grid2',style:'margin-top:8px'},[el('button',{text:'Show UVs',onclick:paintDrawUV}),el('button',{text:'Stamp image',onclick:function(){imgTarget='paint';$('#fileImg').click();}})]));
+  var eyeBtn=el('button',{title:'Pick a color from the texture',text:'Eyedropper',onclick:function(){paint.eyedrop=!paint.eyedrop;updEye();}});function updEye(){eyeBtn.className=paint.eyedrop?'on':'';syncPaintHud();}
+  b.appendChild(el('div',{class:'grid2'},[erBtn,eyeBtn]));
+  b.appendChild(el('div',{class:'grid2',style:'margin-top:8px'},[el('button',{text:'Clear',onclick:function(){paint.ctx.globalCompositeOperation='source-over';paint.ctx.fillStyle='#ffffff';paint.ctx.fillRect(0,0,1024,1024);paint.tex.needsUpdate=true;}}),
+    el('button',{text:'Fill color',onclick:function(){paint.ctx.globalCompositeOperation='source-over';paint.ctx.fillStyle=paint.color;paint.ctx.fillRect(0,0,1024,1024);paint.tex.needsUpdate=true;}})]));
+  b.appendChild(el('div',{class:'grid2',style:'margin-top:8px'},[el('button',{text:'Noise fill',onclick:function(){var n=fbm(512,[{s:8,a:.5},{s:32,a:.4},{s:128,a:.3}]);paint.ctx.globalCompositeOperation='source-over';paint.ctx.drawImage(n,0,0,1024,1024);paint.tex.needsUpdate=true;}}),
+    el('button',{text:'Show UVs',onclick:paintDrawUV})]));
+  b.appendChild(el('button',{style:'width:100%;margin-top:8px',text:'Stamp image',onclick:function(){imgTarget='paint';$('#fileImg').click();}}));
   b.appendChild(el('div',{class:'section-title',text:'Patterns (use brush color)'}));
   var pr=el('div',{class:'chiprow'});
   [['sprinkles','Sprinkles'],['dots','Dots'],['stripes','Stripes'],['checker','Checker'],['gradient','Gradient']].forEach(function(p){pr.appendChild(el('button',{class:'chip',text:p[1],onclick:function(){paintPattern(p[0]);}}));});
@@ -986,14 +1178,62 @@ function panelAssets(b){b.appendChild(el('h2',{text:'Assets'}));b.appendChild(el
   b.appendChild(el('hr',{class:'sep'}));
   b.appendChild(el('button',{style:'width:100%',text:'Save project (.json)',onclick:saveProject}));
   b.appendChild(el('button',{style:'width:100%;margin-top:8px',text:'Open project (.json)',onclick:function(){$('#fileProj').click();}}));
-  b.appendChild(el('button',{style:'width:100%;margin-top:8px',text:'Load sample: Donut',onclick:function(){var d=buildDonut();addModel(d);setActiveModel(d.userData.id);toast('Donut added');renderAssets();}}));}
+  b.appendChild(el('button',{style:'width:100%;margin-top:8px',text:'Load sample: Donut',onclick:function(){var d=buildDonut();addModel(d);setActiveModel(d.userData.id);toast('Donut added');renderAssets();}}));
+  b.appendChild(el('hr',{class:'sep'}));
+  b.appendChild(el('p',{class:'small muted',text:'Your work is autosaved to this browser as you go — reopening the page restores it.'}));
+  b.appendChild(el('button',{style:'width:100%',text:'Clear autosave',onclick:clearAutosave}));}
+/* tiny offscreen renderer for library thumbnails (lazy; shares geometry/materials) */
+var thumbGL=null,thumbScene=null,thumbCam=null;
+function modelThumb(m){
+  try{
+    if(!thumbGL){
+      thumbGL=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});
+      thumbGL.setSize(160,160);thumbGL.outputEncoding=THREE.sRGBEncoding;
+      thumbScene=new THREE.Scene();
+      var d1=new THREE.DirectionalLight(0xfff2e2,1.1);d1.position.set(2,3,2);thumbScene.add(d1);
+      var d2=new THREE.DirectionalLight(0xbcd4ff,.45);d2.position.set(-2,1,-2);thumbScene.add(d2);
+      thumbScene.add(new THREE.AmbientLight(0xffffff,.35));
+      thumbCam=new THREE.PerspectiveCamera(35,1,.01,100);}
+    thumbScene.environment=viewerScene.environment||null;
+    var grp=new THREE.Group();
+    m.userData.parts.forEach(function(p){grp.add(new THREE.Mesh(p.mesh.geometry,p.mat));});
+    thumbScene.add(grp);
+    var box=new THREE.Box3().setFromObject(grp);
+    if(box.isEmpty()){thumbScene.remove(grp);return null;}
+    var c=new THREE.Vector3();box.getCenter(c);var s=new THREE.Vector3();box.getSize(s);
+    var r=Math.max(s.x,s.y,s.z)*.5||1;
+    thumbCam.position.set(c.x+r*1.9,c.y+r*1.5,c.z+r*2.4);thumbCam.lookAt(c);
+    thumbGL.render(thumbScene,thumbCam);
+    var url=thumbGL.domElement.toDataURL('image/png');
+    thumbScene.remove(grp);
+    return url;
+  }catch(e){return null;}}
+
+var assetSearchQuery='';
 function renderAssets(){var body=$('#assetsBody');body.innerHTML='';body.appendChild(el('h2',{style:'font:600 18px/1 \"Fraunces\",serif;margin:0 0 4px',text:'Project Library'}));
   body.appendChild(el('p',{class:'muted small',text:state.models.length+' model'+(state.models.length===1?'':'s')+' · static, no server, exports to your device'}));
-  var grid=el('div',{class:'thumbs'});state.models.forEach(function(m){var parts=m.userData.parts.length;
-    grid.appendChild(el('div',{class:'thumb'},[el('div',{class:'nm',text:m.userData.name}),el('div',{class:'mt',text:parts+' part'+(parts===1?'':'s')+' · '+m.userData.mods.length+' modifier'+(m.userData.mods.length===1?'':'s')}),
-      el('div',{class:'grid2'},[el('button',{text:'Open',onclick:function(){setActiveModel(m.userData.id);setView('viewer');}}),el('button',{text:'To Scene',onclick:function(){addPlacement(m.userData.id);toast('Added to scene');}})]),
-      el('div',{class:'grid2'},[el('button',{text:'Export .glb',onclick:function(){exportGLB(m,m.userData.name+'.glb');}}),el('button',{text:'Export .obj',onclick:function(){exportOBJ(m,m.userData.name+'.obj');}})])]));});
-  body.appendChild(grid);}
+  if(state.models.length>4)body.appendChild(el('input',{type:'text',placeholder:'Search models…',value:assetSearchQuery,style:'margin:8px 0 4px',
+    oninput:function(e){assetSearchQuery=e.target.value;filterAssetGrid();}}));
+  var grid=el('div',{class:'thumbs',id:'assetsGrid',style:'margin-top:10px'});state.models.forEach(function(m){var parts=m.userData.parts.length;
+    var card=el('div',{class:'thumb','data-name':m.userData.name.toLowerCase()});
+    var url=modelThumb(m);
+    if(url)card.appendChild(el('img',{class:'thumb-img',src:url,alt:m.userData.name}));
+    card.appendChild(el('div',{class:'nm tap-edit',title:'Tap to rename',text:m.userData.name,onclick:function(){renameModel(m);}}));
+    card.appendChild(el('div',{class:'mt',text:parts+' part'+(parts===1?'':'s')+' · '+m.userData.mods.length+' modifier'+(m.userData.mods.length===1?'':'s')}));
+    card.appendChild(el('div',{class:'grid2'},[el('button',{text:'Open',onclick:function(){setActiveModel(m.userData.id);setView('viewer');}}),el('button',{text:'To Scene',onclick:function(){addPlacement(m.userData.id);toast('Added to scene');}})]));
+    card.appendChild(el('div',{class:'grid2'},[el('button',{text:'Duplicate',onclick:function(){duplicateModel(m);}}),el('button',{text:'Delete',onclick:function(){deleteModel(m.userData.id);}})]));
+    card.appendChild(el('div',{class:'grid2'},[el('button',{text:'Export .glb',onclick:function(){exportGLB(m,m.userData.name+'.glb');}}),el('button',{text:'Export .obj',onclick:function(){exportOBJ(m,m.userData.name+'.obj');}})]));
+    grid.appendChild(card);});
+  body.appendChild(grid);
+  filterAssetGrid();}
+/* Filters the already-rendered grid in place (no thumbnail re-render) so search stays instant */
+function filterAssetGrid(){var grid=$('#assetsGrid');if(!grid)return;
+  var q=assetSearchQuery.trim().toLowerCase(),any=false;
+  $$('.thumb',grid).forEach(function(card){var match=!q||(card.getAttribute('data-name')||'').indexOf(q)>=0;
+    card.style.display=match?'':'none';if(match)any=true;});
+  var empty=$('#assetsEmptyMsg');
+  if(!any&&q){if(!empty){empty=el('p',{id:'assetsEmptyMsg',class:'muted small',style:'margin-top:12px',text:'No models match "'+assetSearchQuery+'"'});grid.parentNode.appendChild(empty);}}
+  else if(empty)empty.remove();}
 
 /* ----- file inputs ----- */
 var imgTarget='paint';
@@ -1008,11 +1248,32 @@ $('#fileProj').addEventListener('change',function(e){var f=e.target.files[0];if(
 
 /* ----- project save/load (geometry baked) ----- */
 function texToDataURL(t){if(!t||!t.image)return null;var img=t.image,cv;if(img instanceof HTMLCanvasElement)cv=img;else{cv=el('canvas');cv.width=img.width||512;cv.height=img.height||512;try{cv.getContext('2d').drawImage(img,0,0);}catch(e){return null;}}try{return cv.toDataURL('image/png');}catch(e){return null;}}
-function saveProject(){var data={v:2,scene:{env:sceneScene.userData.envId},models:state.models.map(function(m){return {name:m.userData.name,
+function buildProjectData(skipMaps){return {v:2,scene:{env:sceneScene.userData.envId},models:state.models.map(function(m){return {name:m.userData.name,
   parts:m.userData.parts.map(function(p){var g=p.baseGeo;return {pos:Array.from(g.attributes.position.array),uv:g.attributes.uv?Array.from(g.attributes.uv.array):null,index:g.index?Array.from(g.index.array):null,
-    color:'#'+p.mat.color.getHexString(),rough:p.mat.roughness,metal:p.mat.metalness,map:texToDataURL(p.mat.map),
-    emissive:'#'+p.mat.emissive.getHexString(),emInt:p.mat.emissiveIntensity,opacity:p.mat.opacity,transmission:p.mat.transmission||0,clearcoat:p.mat.clearcoat||0};}),mods:m.userData.mods};})};
+    color:'#'+p.mat.color.getHexString(),rough:p.mat.roughness,metal:p.mat.metalness,map:skipMaps?null:texToDataURL(p.mat.map),
+    emissive:'#'+p.mat.emissive.getHexString(),emInt:p.mat.emissiveIntensity,opacity:p.mat.opacity,transmission:p.mat.transmission||0,clearcoat:p.mat.clearcoat||0};}),mods:m.userData.mods};})};}
+function saveProject(){var data=buildProjectData(false);
   download(new Blob([JSON.stringify(data)],{type:'application/json'}),'project.json');toast('Saved project.json');}
+
+/* ----- autosave (localStorage, debounced) ----- */
+var AUTOSAVE_KEY='roxyAutosave',autosaveTimer=null,autosaveWarned=false,autosaveSuspended=false;
+function scheduleAutosave(){if(autosaveSuspended)return;clearTimeout(autosaveTimer);autosaveTimer=setTimeout(doAutosave,1500);}
+function doAutosave(){
+  if(!state.models.length){try{localStorage.removeItem(AUTOSAVE_KEY);}catch(e){}return;}
+  try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(buildProjectData(false)));return;}catch(e){}
+  try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(buildProjectData(true)));
+    if(!autosaveWarned){autosaveWarned=true;toast('Autosave: textures too large, saved geometry only');}}
+  catch(e){if(!autosaveWarned){autosaveWarned=true;toast('Autosave failed (storage full) — export a project.json to be safe');}}}
+function clearAutosave(){try{localStorage.removeItem(AUTOSAVE_KEY);}catch(e){}toast('Autosave cleared');}
+function tryRestoreAutosave(){
+  var raw;try{raw=localStorage.getItem(AUTOSAVE_KEY);}catch(e){return false;}
+  if(!raw)return false;
+  var data;try{data=JSON.parse(raw);}catch(e){try{localStorage.removeItem(AUTOSAVE_KEY);}catch(e2){}return false;}
+  if(!data||!data.models||!data.models.length)return false;
+  autosaveSuspended=true;var ok=false;
+  try{loadProject(data);toast('Restored autosave from last session');ok=true;}
+  catch(e){try{localStorage.removeItem(AUTOSAVE_KEY);}catch(e2){}}
+  autosaveSuspended=false;return ok;}
 function loadProject(data){state.models.length=0;(data.models||[]).forEach(function(md){var parts=md.parts.map(function(pp){var g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pp.pos,3));if(pp.uv)g.setAttribute('uv',new THREE.Float32BufferAttribute(pp.uv,2));if(pp.index)g.setIndex(pp.index);g.computeVertexNormals();
   var mat=makeMaterial({color:new THREE.Color(pp.color).getHex(),rough:pp.rough,metal:pp.metal});
@@ -1038,7 +1299,7 @@ function onViewportTap(e){var slot=curSlot();if(!slot)return;var r=dom.getBoundi
    MESH EDIT MODE
    ═══════════════════════════════════════════════════════ */
 
-var editState={mode:'face',tool:'select',grabActive:false,grabPtId:null,grabPrevX:0,grabPrevY:0,grabSnap:null,multiSel:false,hudExpanded:false,prop:false,propR:.8,mirror:false};
+var editState={mode:'face',tool:'select',grabActive:false,grabPtId:null,grabPrevX:0,grabPrevY:0,grabSnap:null,multiSel:false,hudExpanded:false,prop:false,propR:.8,mirror:false,mirrorAxis:0};
 
 function screenDeltaToWorld(dx,dy){
   var cam=active.vs.cam,rad=active.vs.rad;
@@ -1050,6 +1311,21 @@ function screenDeltaToWorld(dx,dy){
 function distSeg2D(px,py,ax,ay,bx,by){var dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;if(!l2)return Math.hypot(px-ax,py-ay);var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l2));return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));}
 
 var editDirect={ptId:null,pending:false,active:false,startX:0,startY:0,prevX:0,prevY:0,snap:null};
+
+// Applied on drag-release when the top-bar Snap toggle is on: each vertex the drag moved
+// first tries to snap onto a nearby *stationary* vertex (closing gaps exactly, Blender-style
+// vertex snap); only falls back to a 0.1 grid when nothing else is within range. Snap radius
+// scales with camera distance so it feels consistent whether zoomed in or out.
+function applyEditSnap(preDragSnap){
+  var gs=.1,vsnapR=Math.max(.02,active.vs.rad*.025);
+  var movedIdx=[],targetIdx=[];
+  EM.V.forEach(function(v,i){var o=preDragSnap[i];if(!o)return;(v.equals(o)?targetIdx:movedIdx).push(i);});
+  movedIdx.forEach(function(i){
+    var v=EM.V[i],best=-1,bestD=vsnapR;
+    targetIdx.forEach(function(j){var d=v.distanceTo(EM.V[j]);if(d<bestD){bestD=d;best=j;}});
+    if(best>=0)v.copy(EM.V[best]);
+    else v.set(Math.round(v.x/gs)*gs,Math.round(v.y/gs)*gs,Math.round(v.z/gs)*gs);});
+  EM._refresh();}
 
 /* ─── Sculpt brush (push/pull verts on the surface, Blender-like) ─── */
 function falloff(d,R){var t=1-d/R;return t<=0?0:t*t*(3-2*t);}
@@ -1180,48 +1456,124 @@ var RotBall={
 
 var EM={
   V:[],F:[],E:[],_triMap:[],_srcTex:null,
-  _meshObj:null,_edgeObj:null,_vertObj:null,_selObj:null,_overlayObj:null,
+  _meshObj:null,_edgeObj:null,_vertObj:null,_selObj:null,_mirrorObj:null,
   _mat:new THREE.MeshStandardMaterial({color:0xbba898,roughness:.55,side:THREE.DoubleSide}),
   _selMat:new THREE.MeshBasicMaterial({color:0xff8fb1,transparent:true,opacity:.42,side:THREE.DoubleSide,depthTest:false}),
+  _mirrorMat:new THREE.MeshStandardMaterial({color:0x9fd4ff,roughness:.55,side:THREE.DoubleSide,transparent:true,opacity:.5,depthWrite:false}),
 
   clear:function(){
     var self=this;
     [this._meshObj,this._edgeObj,this._vertObj,this._selObj].forEach(function(o){if(o){editScene.remove(o);if(o.geometry)o.geometry.dispose();}});
-    if(this._overlayObj){editScene.remove(this._overlayObj);this._overlayObj=null;}
+    if(this._mirrorObj){editScene.remove(this._mirrorObj);this._mirrorObj=null;}
     this._meshObj=this._edgeObj=this._vertObj=this._selObj=null;
     this.V=[];this.F=[];this.E=[];this._triMap=[];},
 
   fromPrim:function(type){
     EM._srcTex=null;
+    var mt=this._mat;mt.map=null;mt.color.setHex(0xbba898);mt.transparent=false;mt.opacity=1;mt.needsUpdate=true;
     var s=1,geo;
-    if(type==='Cube')geo=new THREE.BoxGeometry(s,s,s,2,2,2);
-    else if(type==='Sphere')geo=new THREE.SphereGeometry(s*.6,8,6);
-    else if(type==='Cylinder')geo=new THREE.CylinderGeometry(s*.5,s*.5,s,8);
+    // Cube/Plane are built as native quads (not via THREE's triangulating BoxGeometry/
+    // PlaneGeometry) so Select Loop and Loop Cut — which both only walk 4-vertex faces —
+    // have real quad topology to work with from the moment a user adds a primitive.
+    if(type==='Cube'){this.clear();this._quadBox(s,2);this._weld(1e-4);this._buildEdges();this._refresh();return;}
+    if(type==='Plane'){this.clear();this._quadPlane(s,4);this._weld(1e-4);this._buildEdges();this._refresh();return;}
+    if(type==='Cylinder'){this.clear();this._quadCylinder(s*.5,s,8,1);this._weld(1e-4);this._buildEdges();this._refresh();return;}
+    if(type==='Prism'){this.clear();this._quadCylinder(s*.5,s,6,1);this._weld(1e-4);this._buildEdges();this._refresh();return;}
+    if(type==='Torus'){this.clear();this._quadTorus(s*.5,s*.2,10,6);this._weld(1e-4);this._buildEdges();this._refresh();return;}
+    if(type==='Sphere')geo=new THREE.SphereGeometry(s*.6,8,6);
     else if(type==='Cone')geo=new THREE.ConeGeometry(s*.5,s,8);
-    else if(type==='Torus')geo=new THREE.TorusGeometry(s*.5,s*.2,6,10);
-    else if(type==='Plane'){geo=new THREE.PlaneGeometry(s,s,4,4);geo.rotateX(-Math.PI/2);}
     else if(type==='Icosphere')geo=new THREE.IcosahedronGeometry(s*.6,1);
     else if(type==='Pyramid')geo=new THREE.ConeGeometry(s*.55,s,4);
-    else if(type==='Prism')geo=new THREE.CylinderGeometry(s*.5,s*.5,s,6);
     else geo=new THREE.BoxGeometry(s,s,s,2,2,2);
     this._fromGeo(geo);geo.dispose();},
+
+  // Push one flat quad-grid face (seg x seg quads) into shared V/F arrays. o=center,
+  // u/v=in-plane axes (unit length s), chosen per-face so u×v points outward — that
+  // keeps _faceNormal's cross(v1-v0,v2-v0) winding consistent with the rest of EM.
+  _gridFace:function(V,F,o,u,v,s,seg){
+    var rows=[];
+    for(var j=0;j<=seg;j++){var row=[];
+      for(var i=0;i<=seg;i++){
+        var iu=(i/seg-.5)*s,jv=(j/seg-.5)*s;
+        var vtx=new THREE.Vector3(o[0]+u[0]*iu+v[0]*jv,o[1]+u[1]*iu+v[1]*jv,o[2]+u[2]*iu+v[2]*jv);
+        vtx.sel=false;vtx.u0=i/seg;vtx.v0=1-j/seg;
+        row.push(V.length);V.push(vtx);}
+      rows.push(row);}
+    for(var j=0;j<seg;j++)for(var i=0;i<seg;i++)
+      F.push({vi:[rows[j][i],rows[j][i+1],rows[j+1][i+1],rows[j+1][i]],sel:false});},
+
+  _quadBox:function(s,seg){
+    var V=[],F=[],h=s/2,self=this;
+    [{o:[0,0,h],u:[1,0,0],v:[0,1,0]},{o:[0,0,-h],u:[-1,0,0],v:[0,1,0]},
+     {o:[h,0,0],u:[0,1,0],v:[0,0,1]},{o:[-h,0,0],u:[0,-1,0],v:[0,0,1]},
+     {o:[0,h,0],u:[0,0,1],v:[1,0,0]},{o:[0,-h,0],u:[0,0,-1],v:[1,0,0]}
+    ].forEach(function(fd){self._gridFace(V,F,fd.o,fd.u,fd.v,s,seg);});
+    this.V=V;this.F=F;},
+
+  _quadPlane:function(s,seg){
+    var V=[],F=[];
+    this._gridFace(V,F,[0,0,0],[1,0,0],[0,0,-1],s,seg);
+    this.V=V;this.F=F;},
+
+  // Native-quad cylinder: a grid of side quads (real loop-cuttable ring topology)
+  // capped with two n-gon fans, built the way Blender's default cylinder is —
+  // no triangulated caps, no apex-pinch vertex duplication down the side.
+  _quadCylinder:function(r,h,radialSeg,heightSeg){
+    var V=[],F=[],hh=h/2,grid=[];
+    for(var a=0;a<=radialSeg;a++){
+      var th=a/radialSeg*Math.PI*2,col=[];
+      for(var hI=0;hI<=heightSeg;hI++){
+        var vtx=new THREE.Vector3(r*Math.cos(th),-hh+h*hI/heightSeg,r*Math.sin(th));
+        vtx.sel=false;vtx.u0=a/radialSeg;vtx.v0=1-hI/heightSeg;
+        col.push(V.length);V.push(vtx);}
+      grid.push(col);}
+    for(var a=0;a<radialSeg;a++)for(var hI=0;hI<heightSeg;hI++)
+      F.push({vi:[grid[a][hI],grid[a][hI+1],grid[a+1][hI+1],grid[a+1][hI]],sel:false});
+    var botVi=[];
+    for(var a=0;a<radialSeg;a++){var th=a/radialSeg*Math.PI*2;var vtx=new THREE.Vector3(r*Math.cos(th),-hh,r*Math.sin(th));vtx.sel=false;botVi.push(V.length);V.push(vtx);}
+    F.push({vi:botVi,sel:false});
+    var topVi=[];
+    for(var a=radialSeg-1;a>=0;a--){var th=a/radialSeg*Math.PI*2;var vtx=new THREE.Vector3(r*Math.cos(th),hh,r*Math.sin(th));vtx.sel=false;topVi.push(V.length);V.push(vtx);}
+    F.push({vi:topVi,sel:false});
+    this.V=V;this.F=F;},
+
+  // Native-quad torus: a doubly-periodic grid (wraps in both the major and minor
+  // directions, seams welded like the cylinder's) — a torus has no poles/caps at
+  // all, so unlike Sphere/Cone this is a pure quad mesh with nothing left over.
+  _quadTorus:function(R,r,radialSeg,tubeSeg){
+    var V=[],F=[],grid=[];
+    for(var i=0;i<=radialSeg;i++){
+      var th=i/radialSeg*Math.PI*2,ct=Math.cos(th),st=Math.sin(th),row=[];
+      for(var j=0;j<=tubeSeg;j++){
+        var ph=j/tubeSeg*Math.PI*2,cp=Math.cos(ph),sp=Math.sin(ph),rad=R+r*cp;
+        var vtx=new THREE.Vector3(rad*ct,r*sp,rad*st);
+        vtx.sel=false;vtx.u0=i/radialSeg;vtx.v0=1-j/tubeSeg;
+        row.push(V.length);V.push(vtx);}
+      grid.push(row);}
+    // face order (i,j)->(i,j+1)->(i+1,j+1)->(i+1,j): u-axis=minor(phi), v-axis=major(theta),
+    // so cross(uAxis,vAxis)=cross(phiDir,thetaDir) matches the tube's outward radial normal
+    for(var i=0;i<radialSeg;i++)for(var j=0;j<tubeSeg;j++)
+      F.push({vi:[grid[i][j],grid[i][j+1],grid[i+1][j+1],grid[i+1][j]],sel:false});
+    this.V=V;this.F=F;},
 
   fromModel:function(m,pi){
     if(!m||!m.userData.parts.length)return;
     pi=pi||0;if(pi>=m.userData.parts.length)pi=0;
     var pt=m.userData.parts[pi];
     EM._srcTex=pt.mat&&pt.mat.map&&pt.mat.map.image?pt.mat.map:null;
-    this._fromGeo(pt.mesh.geometry); // calls clear() which removes old _overlayObj
-    // Texture overlay: ghost of original mesh at 30% opacity (created AFTER _fromGeo survives clear)
-    if(EM._srcTex){
-      var oMat=new THREE.MeshStandardMaterial({map:EM._srcTex,transparent:true,opacity:.30,side:THREE.FrontSide,depthWrite:false});
-      EM._overlayObj=new THREE.Mesh(pt.mesh.geometry,oMat);
-      EM._overlayObj.renderOrder=1;editScene.add(EM._overlayObj);}},
+    // Texture the live edit mesh (per-vertex UVs carried in _fromGeo) so the artist
+    // sees the wrapping deform while sculpting; slight transparency keeps depth readable.
+    var mt=this._mat;
+    if(EM._srcTex){mt.map=EM._srcTex;mt.color.setHex(0xffffff);mt.transparent=true;mt.opacity=.92;}
+    else{mt.map=null;mt.color.setHex(0xbba898);mt.transparent=false;mt.opacity=1;}
+    mt.needsUpdate=true;
+    this._fromGeo(pt.mesh.geometry);},
 
   _fromGeo:function(geo){
     this.clear();
-    var pos=geo.attributes.position,idx=geo.index;
-    for(var i=0;i<pos.count;i++){var v=new THREE.Vector3().fromBufferAttribute(pos,i);v.sel=false;this.V.push(v);}
+    var pos=geo.attributes.position,idx=geo.index,uvA=geo.attributes.uv;
+    for(var i=0;i<pos.count;i++){var v=new THREE.Vector3().fromBufferAttribute(pos,i);v.sel=false;
+      if(uvA){v.u0=uvA.getX(i);v.v0=uvA.getY(i);}this.V.push(v);}
     if(idx){for(var i=0;i<idx.count;i+=3)this.F.push({vi:[idx.getX(i),idx.getX(i+1),idx.getX(i+2)],sel:false});}
     else{for(var i=0;i<pos.count;i+=3)this.F.push({vi:[i,i+1,i+2],sel:false});}
     this._weld(1e-4);this._buildEdges();this._refresh();},
@@ -1242,16 +1594,26 @@ var EM={
       if(!m[k]){var e={a:Math.min(a,b),b:Math.max(a,b),sel:false,fi:[fi]};this.E.push(e);m[k]=e;}else m[k].fi.push(fi);}}},
 
   _toGeo:function(){
-    var pos=[],idx=[];
-    for(var i=0;i<this.V.length;i++)pos.push(this.V[i].x,this.V[i].y,this.V[i].z);
+    var pos=[],idx=[],uv=[],hasUV=false;
+    for(var i=0;i<this.V.length;i++){var v=this.V[i];pos.push(v.x,v.y,v.z);uv.push(v.u0||0,v.v0||0);if(v.u0!==undefined)hasUV=true;}
     this._triMap=[];
     for(var fi=0;fi<this.F.length;fi++){var vi=this.F[fi].vi;for(var t=1;t<vi.length-1;t++){idx.push(vi[0],vi[t],vi[t+1]);this._triMap.push(fi);}}
-    var g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g;},
+    var g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    if(hasUV)g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+    g.setIndex(idx);g.computeVertexNormals();return g;},
 
   _refresh:function(){
     // Main mesh
     if(!this._meshObj){this._meshObj=new THREE.Mesh(new THREE.BufferGeometry(),this._mat);this._meshObj.castShadow=true;editScene.add(this._meshObj);}
     var g=this._toGeo();this._meshObj.geometry.dispose();this._meshObj.geometry=g;
+
+    // Live mirror preview: a negative-scale ghost on the chosen axis sharing the same
+    // geometry, so sculpting and every mesh op are mirrored live without duplicating verts.
+    if(editState.mirror){
+      if(!this._mirrorObj){this._mirrorObj=new THREE.Mesh(g,this._mirrorMat);this._mirrorObj.renderOrder=2;editScene.add(this._mirrorObj);}
+      else this._mirrorObj.geometry=g;
+      this._mirrorObj.scale.set(1,1,1);this._mirrorObj.scale.setComponent(editState.mirrorAxis,-1);
+    }else if(this._mirrorObj){editScene.remove(this._mirrorObj);this._mirrorObj=null;}
 
     // Edges
     if(this._edgeObj){editScene.remove(this._edgeObj);this._edgeObj.geometry.dispose();}
@@ -1324,6 +1686,10 @@ var EM={
     if(mode==='face')this.F.forEach(function(f){if(f.sel)f.vi.forEach(function(vi){selV.add(vi);});});
     else if(mode==='edge')this.E.forEach(function(e){if(e.sel){selV.add(e.a);selV.add(e.b);}});
     else this.V.forEach(function(v,i){if(v.sel)selV.add(i);});
+    // Map built from pre-drag positions on the first grab of a drag (cleared on pointer-up) —
+    // must happen before any vertex moves below, or the very first grab of a drag pairs
+    // vertices using already-moved coordinates and can fail to match them at all.
+    if(editState.mirror&&selV.size&&(!this._mirMap||this._mirMap.length!==this.V.length))this._mirMap=this._mirrorMap();
     var w=null;
     if(editState.prop&&editState.propR>0&&selV.size){
       // weights cached for the duration of one drag (cleared on pointer-up)
@@ -1332,29 +1698,33 @@ var EM={
       for(var i=0;i<this.V.length;i++)if(w[i]>0)this.V[i].addScaledVector(delta,w[i]);
     }else selV.forEach(function(i){this.V[i].add(delta);},this);
     if(editState.mirror&&selV.size){
-      // map built from pre-drag positions on the first grab of a drag; cleared on pointer-up
-      if(!this._mirMap||this._mirMap.length!==this.V.length)this._mirMap=this._mirrorMap();
-      var mm=this._mirMap,self=this;
+      var mm=this._mirMap,self=this,ax=editState.mirrorAxis;
       function wt(i){return w?w[i]:(selV.has(i)?1:0);}
       for(var i=0;i<this.V.length;i++){
         var wi=wt(i);if(wi<=0)continue;
         var j=mm[i];if(j<0)continue;
-        if(j===i){this.V[i].x=0;continue;}          // on-plane verts stay on the plane
+        if(j===i){this.V[i].setComponent(ax,0);continue;}   // on-plane verts stay on the plane
         var wj=wt(j);
-        if(wj>wi||(wj===wi&&j<i))continue;          // stronger (or first) side drives the pair
-        this.V[j].set(-this.V[i].x,this.V[i].y,this.V[i].z);}}
+        if(wj>wi||(wj===wi&&j<i))continue;                  // stronger (or first) side drives the pair
+        this.V[j].copy(this.V[i]);this.V[j].setComponent(ax,-this.V[i].getComponent(ax));}}
     this._refresh();},
 
-  // Vertex → X-mirrored counterpart (-1 when none; own index when on the plane)
+  // Vertex → axis-mirrored counterpart (-1 when none; own index when on the mirror plane)
   _mirMap:null,
   _mirrorMap:function(){
-    var n=this.V.length,map=new Int32Array(n),eps=5e-3;
+    var n=this.V.length,map=new Int32Array(n),eps=5e-3,ax=editState.mirrorAxis;
     for(var i=0;i<n;i++){
       map[i]=-1;var vi=this.V[i];
-      if(Math.abs(vi.x)<eps){map[i]=i;continue;}
-      for(var j=0;j<n;j++){var vj=this.V[j];
-        if(Math.abs(vj.x+vi.x)<eps&&Math.abs(vj.y-vi.y)<eps&&Math.abs(vj.z-vi.z)<eps){map[i]=j;break;}}}
+      if(Math.abs(vi.getComponent(ax))<eps){map[i]=i;continue;}
+      for(var j=0;j<n;j++){var vj=this.V[j],ok=Math.abs(vj.getComponent(ax)+vi.getComponent(ax))<eps;
+        for(var c=0;c<3&&ok;c++)if(c!==ax&&Math.abs(vj.getComponent(c)-vi.getComponent(c))>=eps)ok=false;
+        if(ok){map[i]=j;break;}}}
     return map;},
+
+  // Interpolate carried UVs (u0/v0) from verts ia→ib onto new vert nv (t=0 copies ia's)
+  _uvMix:function(nv,ia,ib,t){var A=this.V[ia],B=this.V[ib];
+    if(A&&A.u0!==undefined&&B&&B.u0!==undefined){nv.u0=A.u0+(B.u0-A.u0)*t;nv.v0=A.v0+(B.v0-A.v0)*t;}
+    else if(A&&A.u0!==undefined){nv.u0=A.u0;nv.v0=A.v0;}},
 
   // Smoothstep falloff from the selection out to editState.propR (world units)
   _propW:null,
@@ -1378,6 +1748,14 @@ var EM={
   _topoSnapshot:function(){return {V:this.V.map(function(v){var c=v.clone();c.sel=v.sel;return c;}),F:this.F.map(function(f){return {vi:f.vi.slice(),sel:f.sel};})};},
   _topoRestore:function(s){this.V=s.V.map(function(v){var c=v.clone();c.sel=v.sel;return c;});this.F=s.F.map(function(f){return {vi:f.vi.slice(),sel:f.sel};});this._buildEdges();this._refresh();if(active.view==='edit')renderPanel();},
   _pushTopo:function(before){var after=this._topoSnapshot();History.push(function(){EM._topoRestore(before);},function(){EM._topoRestore(after);});},
+  // Flatten selected verts onto their average plane along one axis (0=X 1=Y 2=Z)
+  alignSelection:function(ax){var set=this._selVertSet();if(!set.size){toast('Select something first');return;}
+    var snap=this.V.map(function(v){return v.clone();});
+    var sum=0;set.forEach(function(i){sum+=this.V[i].getComponent(ax);},this);
+    var avg=sum/set.size;
+    set.forEach(function(i){this.V[i].setComponent(ax,avg);},this);
+    this._refresh();this._pushVertHistory(snap);
+    toast('Aligned selection on '+'XYZ'[ax]);},
   scaleSelection:function(f){var set=this._selVertSet();if(!set.size){toast('Select something first');return;}
     var snap=this.V.map(function(v){return v.clone();}),c=this._selCentroid(set);
     set.forEach(function(i){this.V[i].sub(c).multiplyScalar(f).add(c);},this);this._refresh();this._pushVertHistory(snap);},
@@ -1391,7 +1769,7 @@ var EM={
     var _b=this._topoSnapshot();
     selF.forEach(function(f){
       var fi=self.F.indexOf(f),n=self._faceNormal(fi),dist=0.3,vMap={};
-      f.vi.forEach(function(vi){if(vMap[vi]===undefined){var nv=self.V[vi].clone().addScaledVector(n,dist);nv.sel=false;self.V.push(nv);vMap[vi]=self.V.length-1;}});
+      f.vi.forEach(function(vi){if(vMap[vi]===undefined){var nv=self.V[vi].clone().addScaledVector(n,dist);nv.sel=false;self._uvMix(nv,vi,vi,0);self.V.push(nv);vMap[vi]=self.V.length-1;}});
       for(var i=0;i<f.vi.length;i++){var a=f.vi[i],b=f.vi[(i+1)%f.vi.length];self.F.push({vi:[a,b,vMap[b],vMap[a]],sel:false});}
       f.vi=f.vi.map(function(vi){return vMap[vi];});f.sel=true;});
     this._buildEdges();this._refresh();this._pushTopo(_b);
@@ -1402,19 +1780,22 @@ var EM={
     if(!selF.length){toast('Select face(s) first (Face mode)');return;}
     var _b=this._topoSnapshot();
     selF.forEach(function(f){
-      var fi=self.F.indexOf(f),c=self._faceCenter(fi),amt=0.22,newVi=f.vi.map(function(vi){var nv=self.V[vi].clone().lerp(c,amt);nv.sel=false;self.V.push(nv);return self.V.length-1;});
+      var fi=self.F.indexOf(f),c=self._faceCenter(fi),amt=0.22,newVi=f.vi.map(function(vi){var nv=self.V[vi].clone().lerp(c,amt);nv.sel=false;self._uvMix(nv,vi,vi,0);self.V.push(nv);return self.V.length-1;});
       for(var i=0;i<f.vi.length;i++){var a=f.vi[i],b=f.vi[(i+1)%f.vi.length];self.F.push({vi:[a,b,newVi[(i+1)%newVi.length],newVi[i]],sel:false});}
       f.vi=newVi;f.sel=true;});
     this._buildEdges();this._refresh();this._pushTopo(_b);renderPanel();},
 
   subdivide:function(){
     var self=this,newF=[],eMid={},hasSel=this.F.some(function(f){return f.sel;}),_b=this._topoSnapshot();
-    function getMid(a,b){var k=Math.min(a,b)+'_'+Math.max(a,b);if(!eMid[k]){var m=self.V[a].clone().add(self.V[b]).multiplyScalar(.5);m.sel=false;self.V.push(m);eMid[k]=self.V.length-1;}return eMid[k];}
+    function getMid(a,b){var k=Math.min(a,b)+'_'+Math.max(a,b);if(!eMid[k]){var m=self.V[a].clone().add(self.V[b]).multiplyScalar(.5);m.sel=false;self._uvMix(m,a,b,.5);self.V.push(m);eMid[k]=self.V.length-1;}return eMid[k];}
     this.F.forEach(function(f){
       if(hasSel&&!f.sel){newF.push(f);return;}
       var vi=f.vi;
       if(vi.length===3){var m01=getMid(vi[0],vi[1]),m12=getMid(vi[1],vi[2]),m20=getMid(vi[2],vi[0]);newF.push({vi:[vi[0],m01,m20],sel:false},{vi:[m01,vi[1],m12],sel:false},{vi:[m12,vi[2],m20],sel:false},{vi:[m01,m12,m20],sel:false});}
-      else{var c=self._faceCenter(self.F.indexOf(f));c.sel=false;self.V.push(c);var ci=self.V.length-1;for(var i=0;i<vi.length;i++){var a=vi[i],b=vi[(i+1)%vi.length],m=getMid(a,b),mp=getMid(vi[(i+vi.length-1)%vi.length],a);newF.push({vi:[a,m,ci,mp],sel:false});}}});
+      else{var c=self._faceCenter(self.F.indexOf(f));c.sel=false;
+        var us=0,vs=0,un=0;vi.forEach(function(x){if(self.V[x].u0!==undefined){us+=self.V[x].u0;vs+=self.V[x].v0;un++;}});
+        if(un===vi.length){c.u0=us/un;c.v0=vs/un;}
+        self.V.push(c);var ci=self.V.length-1;for(var i=0;i<vi.length;i++){var a=vi[i],b=vi[(i+1)%vi.length],m=getMid(a,b),mp=getMid(vi[(i+vi.length-1)%vi.length],a);newF.push({vi:[a,m,ci,mp],sel:false});}}});
     this.F=newF;this._buildEdges();this._refresh();this._pushTopo(_b);},
 
   loopCut:function(){
@@ -1422,12 +1803,85 @@ var EM={
     this.F.forEach(function(f){
       if(hasSel&&!f.sel){newF.push(f);return;}
       if(f.vi.length===4){
-        var vi=f.vi,m01=self.V[vi[0]].clone().add(self.V[vi[1]]).multiplyScalar(.5);m01.sel=true;
-        var m23=self.V[vi[2]].clone().add(self.V[vi[3]]).multiplyScalar(.5);m23.sel=true;
+        var vi=f.vi,m01=self.V[vi[0]].clone().add(self.V[vi[1]]).multiplyScalar(.5);m01.sel=true;self._uvMix(m01,vi[0],vi[1],.5);
+        var m23=self.V[vi[2]].clone().add(self.V[vi[3]]).multiplyScalar(.5);m23.sel=true;self._uvMix(m23,vi[2],vi[3],.5);
         self.V.push(m01,m23);var mi=self.V.length-2,mj=self.V.length-1;
         newF.push({vi:[vi[0],mi,mj,vi[3]],sel:false},{vi:[mi,vi[1],vi[2],mj],sel:false});
       } else newF.push(f);});
     this.F=newF;this._buildEdges();this._refresh();this._pushTopo(_b);},
+
+  // Bake the mirror preview into real geometry: duplicate every face reflected across
+  // the chosen axis plane (winding reversed — any single-axis reflection flips
+  // handedness — so normals stay outward-facing), then weld the halves at the seam.
+  applyMirror:function(){
+    var _b=this._topoSnapshot(),n=this.V.length,ax=editState.mirrorAxis;
+    var mirroredV=this.V.map(function(v){var mv=v.clone();mv.setComponent(ax,-mv.getComponent(ax));mv.sel=false;
+      if(v.u0!==undefined){mv.u0=v.u0;mv.v0=v.v0;}return mv;});
+    var mirroredF=this.F.map(function(f){return {vi:f.vi.map(function(i){return i+n;}).reverse(),sel:false};});
+    this.V=this.V.concat(mirroredV);this.F=this.F.concat(mirroredF);
+    this._weld(1e-4);
+    editState.mirror=false;this._mirMap=null;
+    this._buildEdges();this._refresh();this._pushTopo(_b);
+    renderPanel();renderEditHud();
+    toast('Mirror applied — '+mirroredF.length+' faces mirrored and welded');},
+
+  // Copy selected faces as detached geometry; the copy becomes the selection
+  // so an immediate drag moves it into place (Blender's Shift+D flow).
+  duplicateSelection:function(){
+    var sel=this.F.filter(function(f){return f.sel;});
+    if(!sel.length){toast('Select face(s) first (Face mode)');return;}
+    var self=this,_b=this._topoSnapshot(),vMap={};
+    this.clearSel();
+    sel.forEach(function(f){
+      var nvi=f.vi.map(function(vi){
+        if(vMap[vi]===undefined){
+          var nv=self.V[vi].clone();nv.sel=true;self._uvMix(nv,vi,vi,0);
+          self.V.push(nv);vMap[vi]=self.V.length-1;}
+        return vMap[vi];});
+      self.F.push({vi:nvi,sel:true});});
+    this._buildEdges();this._refresh();this._pushTopo(_b);
+    renderPanel();toast('Duplicated '+sel.length+' face'+(sel.length>1?'s':'')+' — drag to move the copy');},
+
+  // Extend selection along edge loops: through each adjacent quad, continue
+  // to the edge on the opposite side (Blender-style loop select).
+  selectLoops:function(){
+    var sel=this.E.filter(function(e){return e.sel;});
+    if(!sel.length){toast('Select an edge first (Edge mode)');return;}
+    var self=this,eMap={};
+    this.E.forEach(function(e,i){eMap[e.a+'_'+e.b]=i;});
+    function edgeIdx(a,b){return eMap[Math.min(a,b)+'_'+Math.max(a,b)];}
+    var queue=[],seen={};
+    sel.forEach(function(e){var i=self.E.indexOf(e);queue.push(i);seen[i]=1;});
+    var added=0;
+    while(queue.length){
+      var e=self.E[queue.pop()];
+      e.fi.forEach(function(fi){
+        var f=self.F[fi];if(!f||f.vi.length!==4)return;
+        var rest=f.vi.filter(function(v){return v!==e.a&&v!==e.b;});
+        if(rest.length!==2)return;
+        var oi=edgeIdx(rest[0],rest[1]);
+        if(oi==null||seen[oi])return;
+        seen[oi]=1;self.E[oi].sel=true;queue.push(oi);added++;});}
+    this._refresh();renderPanel();
+    toast(added?'Loop selected (+'+added+' edges)':'No quad loop continues from here');},
+
+  // Grow the selection to the whole connected mesh island(s) it touches — verts that
+  // share a face are "linked". Handy after Duplicate/Separate or importing a multi-part
+  // mesh, where one EM holds several disconnected pieces (Blender's "Select Linked").
+  selectLinked:function(){
+    var self=this,n=this.V.length,parent=new Array(n);
+    for(var i=0;i<n;i++)parent[i]=i;
+    function find(x){while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];}return x;}
+    this.F.forEach(function(f){for(var i=1;i<f.vi.length;i++){var ra=find(f.vi[0]),rb=find(f.vi[i]);if(ra!==rb)parent[ra]=rb;}});
+    var seeds=this._selVertSet();
+    if(!seeds.size){toast('Select something first');return;}
+    var comps={};seeds.forEach(function(i){comps[find(i)]=1;});
+    var mode=editState.mode,added=0;
+    if(mode==='face')this.F.forEach(function(f){if(!f.sel&&f.vi.some(function(v){return comps[find(v)];})){f.sel=true;added++;}});
+    else if(mode==='edge')this.E.forEach(function(e){if(!e.sel&&(comps[find(e.a)]||comps[find(e.b)])){e.sel=true;added++;}});
+    else this.V.forEach(function(v,i){if(!v.sel&&comps[find(i)]){v.sel=true;added++;}});
+    this._refresh();renderPanel();
+    toast(added?'Selected linked (+'+added+')':'Island already fully selected');},
 
   bridgeEdges:function(){
     var sel=this.E.filter(function(e){return e.sel;});
@@ -1438,6 +1892,30 @@ var EM={
     var d2=this.V[a1].distanceTo(this.V[b2])+this.V[b1].distanceTo(this.V[a2]);
     this.F.push({vi:(d1<=d2?[a1,b1,b2,a2]:[a1,b1,a2,b2]),sel:false});
     this.clearSel();this._buildEdges();this._refresh();this._pushTopo(_b);toast('Bridged');},
+
+  // Cap a whole boundary loop (a hole left by Delete, or an open primitive edge)
+  // with one new n-gon face, instead of bridging pairs of edges by hand.
+  fillHole:function(){
+    var self=this,sel=this.E.filter(function(e){return e.sel;});
+    if(sel.length<3){toast('Select the boundary edges around a hole (3+, Edge mode)');return;}
+    if(sel.some(function(e){return e.fi.length!==1;})){toast('Selected edges must all be open boundary (1 face) — not shared by 2 faces');return;}
+    // Each boundary edge's lone face "sees" it in one direction (a->b or b->a) as part of
+    // that face's own outward-wound vi list; the cap must traverse each edge the OPPOSITE
+    // way so the new face's winding faces outward too, on the far side of the hole.
+    var next={};
+    for(var i=0;i<sel.length;i++){
+      var e=sel[i],f=this.F[e.fi[0]],vi=f.vi,ia=vi.indexOf(e.a);
+      if(ia<0)continue;
+      var aToB=vi[(ia+1)%vi.length]===e.b;
+      if(aToB)next[e.b]=e.a;else next[e.a]=e.b;}
+    var startV=sel[0].a,loop=[startV],cur=next[startV],guard=0;
+    while(cur!==undefined&&cur!==startV&&guard++<sel.length+1){loop.push(cur);cur=next[cur];}
+    if(cur!==startV||loop.length!==sel.length){toast('Selected edges don\'t form a single closed loop');return;}
+    var _b=this._topoSnapshot();
+    this.clearSel();
+    this.F.push({vi:loop,sel:true});
+    this._buildEdges();this._refresh();this._pushTopo(_b);
+    renderPanel();toast('Filled hole with a '+loop.length+'-sided face');},
 
   // Chamfer-bevel selected interior edges: each edge splits into a flat strip.
   // Edges sharing a vertex with an already-beveled edge are skipped this pass.
@@ -1454,7 +1932,7 @@ var EM={
       var na1=nbr(f1,e.a,e.b),nb1=nbr(f1,e.b,e.a),na2=nbr(f2,e.a,e.b),nb2=nbr(f2,e.b,e.a);
       if(na1<0||nb1<0||na2<0||nb2<0)return;
       var nsum=self._faceNormal(e.fi[0]).add(self._faceNormal(e.fi[1]));
-      function mk(v,to){var nv=self.V[v].clone().lerp(self.V[to],t);nv.sel=false;self.V.push(nv);return self.V.length-1;}
+      function mk(v,to){var nv=self.V[v].clone().lerp(self.V[to],t);nv.sel=false;self._uvMix(nv,v,to,t);self.V.push(nv);return self.V.length-1;}
       var A1=mk(e.a,na1),B1=mk(e.b,nb1),A2=mk(e.a,na2),B2=mk(e.b,nb2);
       var ia=f1.vi.indexOf(e.a);
       var aThenB=f1.vi[(ia+1)%f1.vi.length]===e.b;
@@ -1507,6 +1985,20 @@ var EM={
     this.F.forEach(function(f){if(!hasSel||f.sel)f.vi.reverse();});
     this._refresh();this._pushTopo(_b);},
 
+  // Heuristic auto-orient: flip any face whose normal points toward the mesh's
+  // centroid instead of away from it. Works well for star-convex / primitive-like
+  // shapes (most sculpted/hard-surface models); not a general BSP solution.
+  recalcNormals:function(){
+    var self=this,_b=this._topoSnapshot(),hasSel=this.F.some(function(f){return f.sel;});
+    var c=new THREE.Vector3();this.V.forEach(function(v){c.add(v);});c.divideScalar(this.V.length||1);
+    var flipped=0;
+    this.F.forEach(function(f,fi){
+      if(hasSel&&!f.sel)return;
+      var n=self._faceNormal(fi),fc=self._faceCenter(fi);
+      if(n.dot(fc.clone().sub(c))<0){f.vi.reverse();flipped++;}});
+    this._refresh();this._pushTopo(_b);
+    toast(flipped?'Flipped '+flipped+' face'+(flipped>1?'s':'')+' to face outward':'Normals already consistent');},
+
   smoothVerts:function(){
     var self=this,snap=this.V.map(function(v){return v.clone();}),newPos=this.V.map(function(v){return v.clone();});
     var count=new Array(this.V.length).fill(0),sum=this.V.map(function(){return new THREE.Vector3();});
@@ -1519,10 +2011,31 @@ var EM={
     this._refresh();this._pushVertHistory(snap);},
 
   exportToModel:function(){
-    var geo=this._toExportGeo(),mat=makeMaterial({color:EM._srcTex?0xffffff:0xcdb7a4,rough:.55});
+    // With a source texture, export using the carried per-vertex UVs so the original
+    // wrapping survives the edit session; otherwise use the unique per-face atlas.
+    var keepUV=!!(EM._srcTex&&this.V.some(function(v){return v.u0!==undefined;}));
+    var geo=keepUV?this._facesToGeoKeepUV(this.F):this._toExportGeo();
+    var mat=makeMaterial({color:EM._srcTex?0xffffff:0xcdb7a4,rough:.55});
     if(EM._srcTex){mat.map=EM._srcTex;mat.needsUpdate=true;}
     var name='Mesh '+(state.models.length+1);var m=makeModel(name,[{geo:geo,mat:mat}]);
+    if(keepUV)m.userData.parts[0]._hasProperUVs=(EM._srcTex.flipY===false);
     addModel(m);setActiveModel(m.userData.id);toast('"'+name+'" added — open Viewer');renderPanel();},
+
+  // Unindexed triangles keeping each vertex's carried u0/v0 (flat per-face normals)
+  _facesToGeoKeepUV:function(faces){
+    var self=this,pos=[],nor=[],uv=[];
+    for(var q=0;q<faces.length;q++){
+      var f=faces[q],fi=this.F.indexOf(f),n=this._faceNormal(fi),vi=f.vi;
+      for(var t=1;t<vi.length-1;t++){
+        [0,t,t+1].forEach(function(k){
+          var v=self.V[vi[k]];
+          pos.push(v.x,v.y,v.z);nor.push(n.x,n.y,n.z);
+          uv.push(v.u0||0,v.v0||0);});}}
+    var g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+    g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+    return g;},
 
   // Separate selected faces into a brand-new model (e.g. icing off a donut top)
   separateSelection:function(){
@@ -1763,6 +2276,15 @@ function hudSlider(label,min,max,val,step,on){
   var r=el('input',{type:'range',min:min,max:max,step:step,value:val,class:'hud-range',
     oninput:function(e){out.textContent=(+e.target.value).toFixed(2);on(+e.target.value);}});
   return el('div',{class:'hud-row hud-srow'},[el('span',{class:'hud-slbl',text:label}),r,out]);}
+// One control cycles the mirror through Off → X → Y → Z (no extra buttons to crowd the
+// mobile HUD); the label shows the active axis so the current state is always readable.
+function cycleMirror(){var es=editState;
+  if(!es.mirror){es.mirror=true;es.mirrorAxis=0;}
+  else if(es.mirrorAxis<2){es.mirrorAxis++;}
+  else{es.mirror=false;}
+  EM._mirMap=null;EM._refresh();renderEditHud();renderPanel();
+  toast(es.mirror?'Mirror '+'XYZ'[es.mirrorAxis]+' — the other half mirrors live':'Mirror off');}
+function mirrorBtnLabel(){return editState.mirror?'Mir '+'XYZ'[editState.mirrorAxis]:'Mirror';}
 function renderEditHud(){
   var hud=$('#editHud');if(!hud)return;
   hud.innerHTML='';
@@ -1783,12 +2305,16 @@ function renderEditHud(){
     }else{
       ['face','vert','edge'].forEach(function(m){
         r1.appendChild(el('button',{class:'hud-btn'+(mode===m?' on':''),text:m[0].toUpperCase()+m.slice(1),onclick:function(){editState.mode=m;EM.clearSel();EM._refresh();renderPanel();}}));});
-      r1.appendChild(el('button',{class:'hud-btn'+(editState.multiSel?' on':''),title:'Multi-select: tap to add to selection',text:'+Sel',onclick:function(){editState.multiSel=!editState.multiSel;renderEditHud();}}));
+      r1.appendChild(el('button',{class:'hud-btn'+(editState.multiSel?' on':''),title:'Multi-select: tap to add to selection',text:'Multi',onclick:function(){editState.multiSel=!editState.multiSel;renderEditHud();}}));
     }
     r1.appendChild(el('button',{class:'hud-btn'+(editState.hudExpanded?' on':''),text:'···',onclick:function(){editState.hudExpanded=!editState.hudExpanded;renderEditHud();}}));
     hud.appendChild(r1);
 
     if(editState.hudExpanded){
+      var vrow2=el('div',{class:'hud-row hud-compact'});
+      [['front','Front'],['back','Back'],['left','Left'],['right','Right'],['top','Top']].forEach(function(p){
+        vrow2.appendChild(el('button',{class:'hud-btn',text:p[1],onclick:function(){snapView(p[0]);}}));});
+      hud.appendChild(vrow2);
       if(sculpting){
         var symrow2=el('div',{class:'hud-row hud-compact'});
         [[0,'Sym Off'],[1,'X'],[2,'Y'],[3,'Z']].forEach(function(p){symrow2.appendChild(el('button',{class:'hud-btn'+(Sculpt.symmetry===p[0]?' on':''),text:p[1],onclick:function(){Sculpt.symmetry=p[0];renderEditHud();}}));});
@@ -1801,14 +2327,17 @@ function renderEditHud(){
         mr2.appendChild(el('button',{class:'hud-btn',text:'All',onclick:function(){EM.selAll();}}));
         mr2.appendChild(el('button',{class:'hud-btn',text:'None',onclick:function(){EM.clearSel();EM._refresh();renderPanel();}}));
         mr2.appendChild(el('button',{class:'hud-btn'+(editState.prop?' on':''),text:'Soft',onclick:function(){editState.prop=!editState.prop;EM._propW=null;renderEditHud();renderPanel();}}));
-        mr2.appendChild(el('button',{class:'hud-btn'+(editState.mirror?' on':''),text:'Mirror',onclick:function(){editState.mirror=!editState.mirror;EM._mirMap=null;renderEditHud();renderPanel();}}));
+        mr2.appendChild(el('button',{class:'hud-btn'+(editState.mirror?' on':''),title:'Cycle mirror axis: Off → X → Y → Z',text:mirrorBtnLabel(),onclick:cycleMirror}));
+        if(editState.mirror)mr2.appendChild(el('button',{class:'hud-btn',title:'Bake the mirrored half into real geometry',text:'Apply Mirror',onclick:function(){EM.applyMirror();}}));
         if(selN>0){
-          if(mode==='face'){mr2.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Separate',onclick:function(){EM.separateSelection();}}));}
+          mr2.appendChild(el('button',{class:'hud-btn',title:'Grow to the whole connected island',text:'Linked',onclick:function(){EM.selectLinked();}}));
+          if(mode==='face'){mr2.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Dup',onclick:function(){EM.duplicateSelection();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Separate',onclick:function(){EM.separateSelection();}}));}
           if(mode==='vert'){mr2.appendChild(el('button',{class:'hud-btn',text:'Merge',onclick:function(){EM.mergeSelected();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Smooth',onclick:function(){EM.smoothVerts();renderPanel();}}));}
-          if(mode==='edge'){mr2.appendChild(el('button',{class:'hud-btn',text:'Bevel',onclick:function(){EM.bevelEdges();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Bridge',onclick:function(){EM.bridgeEdges();renderPanel();}}));}
+          if(mode==='edge'){mr2.appendChild(el('button',{class:'hud-btn',text:'Loop',onclick:function(){EM.selectLoops();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Bevel',onclick:function(){EM.bevelEdges();}}));mr2.appendChild(el('button',{class:'hud-btn',text:'Bridge',onclick:function(){EM.bridgeEdges();renderPanel();}}));mr2.appendChild(el('button',{class:'hud-btn',title:'Cap a whole boundary loop with one face',text:'Fill',onclick:function(){EM.fillHole();}}));}
           mr2.appendChild(el('button',{class:'hud-btn',text:'Subdiv',onclick:function(){EM.subdivide();renderPanel();}}));
           mr2.appendChild(el('button',{class:'hud-btn',text:'Delete',onclick:function(){EM.deleteSelected();}}));
           mr2.appendChild(el('button',{class:'hud-btn',text:'Flip',onclick:function(){EM.flipNormals();}}));
+          mr2.appendChild(el('button',{class:'hud-btn',text:'Recalc',onclick:function(){EM.recalcNormals();}}));
         }
         mr2.appendChild(el('button',{class:'hud-btn',text:'Save →',onclick:function(){EM.exportToModel();}}));
         hud.appendChild(mr2);
@@ -1818,10 +2347,14 @@ function renderEditHud(){
       var qr=el('div',{class:'hud-row hud-compact'});
       if(mode==='face'){qr.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));qr.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));}
       if(mode==='vert'){qr.appendChild(el('button',{class:'hud-btn',text:'Merge',onclick:function(){EM.mergeSelected();}}));qr.appendChild(el('button',{class:'hud-btn',text:'Smooth',onclick:function(){EM.smoothVerts();renderPanel();}}));}
-      if(mode==='edge'){qr.appendChild(el('button',{class:'hud-btn',text:'Bevel',onclick:function(){EM.bevelEdges();}}));}
+      if(mode==='edge'){qr.appendChild(el('button',{class:'hud-btn',text:'Loop',onclick:function(){EM.selectLoops();}}));qr.appendChild(el('button',{class:'hud-btn',text:'Bevel',onclick:function(){EM.bevelEdges();}}));}
       qr.appendChild(el('button',{class:'hud-btn',text:'Del',onclick:function(){EM.deleteSelected();}}));
       hud.appendChild(qr);
     }
+    // Rows with more buttons than fit get a trailing fade so they read as "swipe for
+    // more" — otherwise a clipped label (or the hidden "..." expand toggle) looks broken.
+    Array.prototype.forEach.call(hud.querySelectorAll('.hud-compact'),function(row){
+      row.classList.toggle('has-overflow',row.scrollWidth>row.clientWidth+1);});
     return;
   }
 
@@ -1859,14 +2392,17 @@ function renderEditHud(){
   mr.appendChild(el('button',{class:'hud-btn',text:'None',onclick:function(){EM.clearSel();EM._refresh();renderPanel();}}));
   mr.appendChild(el('button',{class:'hud-btn'+(editState.multiSel?' on':''),title:'Multi-select (additive tap)',text:'Multi',onclick:function(){editState.multiSel=!editState.multiSel;renderEditHud();}}));
   mr.appendChild(el('button',{class:'hud-btn'+(editState.prop?' on':''),title:'Proportional edit (soft falloff)',text:'Soft',onclick:function(){editState.prop=!editState.prop;EM._propW=null;renderEditHud();renderPanel();}}));
-  mr.appendChild(el('button',{class:'hud-btn'+(editState.mirror?' on':''),title:'X-mirror moves across the YZ plane',text:'Mirror',onclick:function(){editState.mirror=!editState.mirror;EM._mirMap=null;renderEditHud();renderPanel();}}));
+  mr.appendChild(el('button',{class:'hud-btn'+(editState.mirror?' on':''),title:'Cycle mirror axis: Off → X → Y → Z',text:mirrorBtnLabel(),onclick:cycleMirror}));
+  if(editState.mirror)mr.appendChild(el('button',{class:'hud-btn',title:'Bake the mirrored half into real geometry',text:'Apply Mirror',onclick:function(){EM.applyMirror();}}));
   hud.appendChild(mr);
 
   if(selN>0){
     var or=el('div',{class:'hud-row'});
+    or.appendChild(el('button',{class:'hud-btn',title:'Grow to the whole connected island',text:'Linked',onclick:function(){EM.selectLinked();}}));
     if(mode==='face'){
       or.appendChild(el('button',{class:'hud-btn',text:'Extrude',onclick:function(){EM.extrude();}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Inset',onclick:function(){EM.inset();}}));
+      or.appendChild(el('button',{class:'hud-btn',text:'Dup',onclick:function(){EM.duplicateSelection();}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Separate',onclick:function(){EM.separateSelection();}}));
     }
     if(mode==='vert'){
@@ -1874,12 +2410,15 @@ function renderEditHud(){
       or.appendChild(el('button',{class:'hud-btn',text:'Smooth',onclick:function(){EM.smoothVerts();renderPanel();}}));
     }
     if(mode==='edge'){
+      or.appendChild(el('button',{class:'hud-btn',text:'Loop',onclick:function(){EM.selectLoops();}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Bevel',onclick:function(){EM.bevelEdges();}}));
       or.appendChild(el('button',{class:'hud-btn',text:'Bridge',onclick:function(){EM.bridgeEdges();renderPanel();}}));
+      or.appendChild(el('button',{class:'hud-btn',title:'Cap a whole boundary loop with one face',text:'Fill',onclick:function(){EM.fillHole();}}));
     }
     or.appendChild(el('button',{class:'hud-btn',text:'Subdivide',onclick:function(){EM.subdivide();renderPanel();}}));
     or.appendChild(el('button',{class:'hud-btn',text:'Delete',onclick:function(){EM.deleteSelected();}}));
     or.appendChild(el('button',{class:'hud-btn',text:'Flip',onclick:function(){EM.flipNormals();}}));
+    or.appendChild(el('button',{class:'hud-btn',text:'Recalc',onclick:function(){EM.recalcNormals();}}));
     hud.appendChild(or);
   }
 
@@ -1938,10 +2477,19 @@ function panelEdit(b){
   var selN=EM.selCount();
   if(selN>0)b.appendChild(el('div',{class:'card',style:'text-align:center;margin-top:8px;color:var(--pink)'},[el('span',{text:selN+' '+editState.mode+(selN>1?'s':'')+' selected'})]));
 
+  b.appendChild(el('div',{class:'section-title',text:'View'}));
+  b.appendChild(el('div',{class:'chiprow'},[
+    el('button',{class:'chip',text:'Front',onclick:function(){snapView('front');}}),
+    el('button',{class:'chip',text:'Back',onclick:function(){snapView('back');}}),
+    el('button',{class:'chip',text:'Left',onclick:function(){snapView('left');}}),
+    el('button',{class:'chip',text:'Right',onclick:function(){snapView('right');}}),
+    el('button',{class:'chip',text:'Top',onclick:function(){snapView('top');}})]));
+
   b.appendChild(el('div',{class:'section-title',text:'Transform'}));
   b.appendChild(el('p',{class:'small muted',style:'margin-bottom:6px',text:'Select elements then drag them in the 3D view to move · RotBall to orbit · two-finger to zoom/pan'}));
   b.appendChild(el('div',{class:'grid2'},[el('button',{text:'Scale +',onclick:function(){EM.scaleSelection(1.1);}}),el('button',{text:'Scale −',onclick:function(){EM.scaleSelection(1/1.1);}})]));
   b.appendChild(el('div',{class:'spread',style:'margin-top:6px'},[el('button',{style:'flex:1',text:'Rot X',onclick:function(){EM.rotateSelection('x',Math.PI/12);}}),el('button',{style:'flex:1',text:'Rot Y',onclick:function(){EM.rotateSelection('y',Math.PI/12);}}),el('button',{style:'flex:1',text:'Rot Z',onclick:function(){EM.rotateSelection('z',Math.PI/12);}})]));
+  b.appendChild(el('div',{class:'spread',style:'margin-top:6px'},[el('button',{style:'flex:1',title:'Flatten selection to its average X plane',text:'Align X',onclick:function(){EM.alignSelection(0);}}),el('button',{style:'flex:1',title:'Flatten selection to its average Y plane',text:'Align Y',onclick:function(){EM.alignSelection(1);}}),el('button',{style:'flex:1',title:'Flatten selection to its average Z plane',text:'Align Z',onclick:function(){EM.alignSelection(2);}})]));
   b.appendChild(el('div',{style:'margin-top:6px'},[el('button',{class:editState.prop?'on':'',style:'width:100%',
     text:editState.prop?'✓ Proportional edit (soft falloff)':'Proportional edit (soft falloff)',
     onclick:function(){editState.prop=!editState.prop;EM._propW=null;renderPanel();renderEditHud();
@@ -1950,10 +2498,11 @@ function panelEdit(b){
     b.appendChild(el('label',{class:'fld',style:'margin-top:6px',text:'Falloff radius'}));
     b.appendChild(el('input',{type:'range',min:.1,max:3,step:.05,value:editState.propR,
       oninput:function(e){editState.propR=+e.target.value;EM._propW=null;}}));}
-  b.appendChild(el('div',{style:'margin-top:6px'},[el('button',{class:editState.mirror?'on':'',style:'width:100%',
-    text:editState.mirror?'✓ X-Mirror (moves reflect across YZ)':'X-Mirror (moves reflect across YZ)',
-    onclick:function(){editState.mirror=!editState.mirror;EM._mirMap=null;renderPanel();renderEditHud();
-      toast(editState.mirror?'Drag-moves now mirror to matching verts across X':'X-Mirror off');}})]));
+  b.appendChild(el('div',{style:'margin-top:6px'},[el('button',{class:editState.mirror?'on':'',style:'width:100%',title:'Cycle mirror axis: Off → X → Y → Z',
+    text:editState.mirror?'✓ Mirror '+'XYZ'[editState.mirrorAxis]+' (live ghost + mirrored drags)':'Mirror (live ghost + mirrored drags)',
+    onclick:cycleMirror})]));
+  if(editState.mirror)b.appendChild(el('button',{style:'width:100%;margin-top:6px',title:'Bake the mirrored half into real, welded geometry',
+    text:'Apply Mirror '+'XYZ'[editState.mirrorAxis]+' (bake + weld)',onclick:function(){EM.applyMirror();}}));
 
   b.appendChild(el('div',{class:'section-title',text:'Operations'}));
   b.appendChild(el('div',{class:'grid2'},[
@@ -1968,10 +2517,14 @@ function panelEdit(b){
     el('button',{text:'Delete  [X]',onclick:function(){EM.deleteSelected();}}),
     el('button',{text:'Flip Normals',onclick:function(){EM.flipNormals();}})
   ]));
+  b.appendChild(el('button',{style:'width:100%;margin-top:6px',title:'Auto-flip any face pointing inward toward the mesh center',
+    text:'Recalculate Normals (Outside)  [N]',onclick:function(){EM.recalcNormals();}}));
   b.appendChild(el('div',{class:'grid2',style:'margin-top:6px'},[
     el('button',{text:'Separate Faces',onclick:function(){EM.separateSelection();}}),
     el('button',{text:'Bridge Edges',onclick:function(){EM.bridgeEdges();renderPanel();}})
   ]));
+  b.appendChild(el('button',{style:'width:100%;margin-top:6px',title:'Select all the boundary edges around a hole (Edge mode), then cap it with one face',
+    text:'Fill Hole',onclick:function(){EM.fillHole();}}));
   b.appendChild(el('div',{class:'grid2',style:'margin-top:6px'},[
     el('button',{text:'Merge Verts',onclick:function(){EM.mergeSelected();}}),
     el('button',{text:'Smooth',onclick:function(){EM.smoothVerts();renderPanel();}})
@@ -1980,10 +2533,16 @@ function panelEdit(b){
     el('button',{text:'Weld Close',onclick:function(){EM.weldClose();renderPanel();}}),
     el('button',{text:'Bevel Edges  [B]',onclick:function(){EM.bevelEdges();}})
   ]));
+  b.appendChild(el('div',{class:'grid2',style:'margin-top:6px'},[
+    el('button',{text:'Select Loop  [L]',onclick:function(){EM.selectLoops();}}),
+    el('button',{text:'Duplicate  [D]',onclick:function(){EM.duplicateSelection();}})
+  ]));
+  b.appendChild(el('button',{style:'width:100%;margin-top:6px',title:'Grow the selection to the whole connected mesh island',
+    text:'Select Linked',onclick:function(){EM.selectLinked();}}));
 
   b.appendChild(el('hr',{class:'sep'}));
   b.appendChild(el('div',{class:'section-title',text:'Keyboard shortcuts (desktop)'}));
-  b.appendChild(el('p',{class:'small muted',text:'E=Extrude  I=Inset  S=Subdivide  B=Bevel  X=Delete  A=Select All  drag selected → move  6=Open this tab'}));
+  b.appendChild(el('p',{class:'small muted',text:'E=Extrude  I=Inset  S=Subdivide  B=Bevel  L=Loop Select  N=Recalc Normals  D=Duplicate  X=Delete  A=Select All  drag selected → move  6=Open this tab'}));
 
   b.appendChild(el('hr',{class:'sep'}));
   b.appendChild(el('div',{class:'section-title',text:'Export to library'}));
@@ -2028,7 +2587,8 @@ $('#btnUndo').addEventListener('click',function(){History.undo();});
 $('#btnRedo').addEventListener('click',function(){History.redo();});
 $('#quUndo').addEventListener('click',function(){History.undo();});
 $('#quRedo').addEventListener('click',function(){History.redo();});
-$('#btnSnap').addEventListener('click',function(e){Gizmo.snap=!Gizmo.snap;e.currentTarget.className=Gizmo.snap?'act on':'act';toast(Gizmo.snap?'Grid snap on':'Grid snap off');});
+$('#btnSnap').addEventListener('click',function(e){Gizmo.snap=!Gizmo.snap;e.currentTarget.className=Gizmo.snap?'act on':'act';
+  toast(Gizmo.snap?(active.view==='edit'?'Snap on — snaps to nearby verts, falls back to grid':'Grid snap on'):'Snap off');});
 window.addEventListener('keydown',function(e){var tag=(e.target&&e.target.tagName)||'';if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
   var z=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&z==='z'){e.preventDefault();History.undo();}
@@ -2040,6 +2600,9 @@ window.addEventListener('keydown',function(e){var tag=(e.target&&e.target.tagNam
     else if(z==='e'){e.preventDefault();EM.extrude();}
     else if(z==='i'){EM.inset();}
     else if(z==='b'){EM.bevelEdges();}
+    else if(z==='l'){EM.selectLoops();}
+    else if(z==='n'){EM.recalcNormals();}
+    else if(z==='d'&&!e.ctrlKey&&!e.metaKey){e.preventDefault();EM.duplicateSelection();}
     else if(z==='x'){EM.deleteSelected();}
     else if(z==='s'&&!e.ctrlKey&&!e.metaKey){EM.subdivide();renderPanel();}
   }});
@@ -2063,10 +2626,10 @@ function syncZoomKnob(){
   zo.addEventListener('click',function(){if(!active||!active.vs)return;active.vs.rad=clamp(active.vs.rad/0.82,.6,60);updateCam();syncZoomKnob();invalidate();});
 })();
 RotBall.init();
-setView('edit');updUndo();
+var _restored=tryRestoreAutosave();
+setView(_restored?'viewer':'edit');updUndo();
 loop();
 boot.style.display='none';
-toast('Welcome to ROXY.JS — tap a face/vert/edge to select, drag the gizmo to move');
 })();
 </script>
 </body>
