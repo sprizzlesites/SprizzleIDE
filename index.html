@@ -1407,7 +1407,6 @@ function isMeteredBackend(){return S.ai.backend==='openai'||S.ai.backend==='anth
 function aiMaxToolSteps(){return isMeteredBackend()?4:AI_TOOL_MAX_STEPS;}
 function aiSleep(ms){return new Promise(r=>setTimeout(r,ms));}
 let aiBusy=false;        // re-entrancy guard: only one generation loop at a time
-let aiCooldownUntil=0;   // set from a 429 Retry-After — block sends until then
 // A single @@READ chunk (and the tool note) must stay well under the context
 // window or a chunk + prompt overflows it — scale both to the live budget.
 function aiReadMaxLines(){return Math.max(30,Math.min(120,Math.floor(effectiveCtxWindow()/48)));}
@@ -1623,6 +1622,31 @@ function buildSys(latestMsg,forceTools){
   return s;
 }
 
+// A capable cloud model with a large context doesn't need the chunked tool
+// loop to edit a file it can already see. That loop costs 3-5 requests and
+// re-sends a growing context each round, which trips free-tier per-minute
+// request/token limits (429). For metered backends we prefer a SINGLE request:
+// inline the whole file, ask for the complete edited file back, apply it. The
+// tool loop stays for local tiny-context models and files too big to inline
+// (paging a preview + "return the whole file" would risk a truncated overwrite).
+function aiSingleShot(){
+  if(!isMeteredBackend())return false;
+  if(S.ctx.project)return false;                 // project-wide work may span files → keep tools
+  if(!S.activeTab)return true;                   // no file, or create-new-file → one shot is fine
+  const c=S.files[S.activeTab]?.content||'';
+  return estimateTokens(c)<=Math.floor(effectiveCtxWindow()*0.25); // only if the WHOLE file fits
+}
+function buildSingleShotSys(){
+  const base=S.ai.systemPrompt||'';const path=S.activeTab;
+  let s=base+`\n\nHOW TO EDIT: apply a change by returning the COMPLETE updated file in ONE fenced block whose opening fence is \`file:\` + the path — never a diff, partial snippet, or placeholder. `+
+    (path?`For the open file use exactly:\n\`\`\`file:${path}\n<entire updated contents of ${path}>\n\`\`\``
+         :`To create a file: \`\`\`file:path/to/file\n<contents>\n\`\`\``)+
+    `\nKeep any explanation to one sentence outside the block. Never tell the user to copy/paste.`;
+  if(S.ctx.file&&path){const c=S.files[path]?.content||'';s+=`\n\nCurrent file ${path} (${lang(path)}, ${c.split('\n').length} lines) — full contents:\n\`\`\`\n${c}\n\`\`\``;}
+  if(S.ctx.errors&&S.problems.length)s+=`\n\nErrors:\n${S.problems.map(p=>`- ${p.message}`).join('\n')}`;
+  return s;
+}
+
 async function sendAIMessage(){
   const inp=document.getElementById('ai-input');const msg=inp.value.trim();if(!msg)return;
   if(!S.aiConnected){aiMsg('system','⚠️ No AI model connected. Go to AI → Configure AI Model.');return;}
@@ -1631,7 +1655,6 @@ async function sendAIMessage(){
   // during a tool loop starts a second concurrent loop that shares S.aiHistory
   // (corrupting it) and doubles the request rate. Leave the user's text intact.
   if(aiBusy){aiMsg('system','⏳ Still working on the previous message — please wait for it to finish.');return;}
-  if(Date.now()<aiCooldownUntil){aiMsg('system',`⏳ Rate-limited — please wait ${Math.ceil((aiCooldownUntil-Date.now())/1000)}s before sending again.`);return;}
   aiBusy=true;
   const sel=S.ctx.selection?getsel():null;
   let uc=msg;if(sel)uc+=`\n\nSelected code:\n\`\`\`\n${sel}\n\`\`\``;
@@ -1640,10 +1663,16 @@ async function sendAIMessage(){
   updateCtxTokenBar(); // refresh bar after adding user message
   const th=aiThink();document.getElementById('ai-send').disabled=true;
   try{
+    let r='';
+    if(aiSingleShot()){
+      // ONE request: the model already has the whole file, so it returns the
+      // complete edit directly — no tool round-trips, no growing context.
+      r=stripThink(await callAI(S.aiHistory,buildSingleShotSys()));
+    }else{
     // Agentic loop: the model may issue @@ tool commands to read / search /
     // edit project files chunk by chunk. Each result is fed back to it until
     // it produces a final answer (or the step budget runs out).
-    let r='',steps=0,bounces=0,lastReply=null;const maxSteps=aiMaxToolSteps();
+    let steps=0,bounces=0,lastReply=null;const maxSteps=aiMaxToolSteps();
     while(true){
       // Space out requests to metered APIs so a multi-step loop doesn't burst
       // past a free tier's per-minute limit.
@@ -1670,6 +1699,7 @@ async function sendAIMessage(){
       aiMsg('system','🔧 '+res.note);
       S.aiHistory.push({role:'user',content:'[tool result]\n'+res.output});
       updateCtxTokenBar();
+    }
     }
     S.aiHistory.push({role:'assistant',content:r});
     if(S.ai.autoResetCtx)S.aiHistory=[];
@@ -1703,14 +1733,15 @@ async function sendAIMessage(){
 function cleanBaseUrl(u){u=(u||'').trim().replace(/\/+$/,'');u=u.replace(/\/(chat\/completions|api\/chat)$/i,'');return u.replace(/\/+$/,'');}
 function cleanKey(k){return (k||'').replace(/\s+/g,'');}
 // Surface the API's own explanation instead of a bare status code, and treat
-// 429 specially: honour Retry-After and set a cooldown so we stop hammering.
+// 429 specially: explain the limit. We do NOT block further sends — the user
+// can retry whenever they like; a stale client-side countdown was more annoying
+// than useful (it "paused" while the tab was closed).
 async function apiError(prefix,r){
   let d='';try{const j=await r.json();d=j.error?.message||j.message||(typeof j.error==='string'?j.error:'');}catch(e){}
   if(r.status===429){
     const ra=parseInt((r.headers&&r.headers.get&&r.headers.get('retry-after'))||'',10);
-    const waitS=Number.isFinite(ra)&&ra>0?Math.min(ra,120):30;
-    aiCooldownUntil=Date.now()+waitS*1000;
-    return new Error(`${prefix} 429: rate limit / quota exceeded${d?' — '+d:''}. Pausing ${waitS}s before you can send again. Free tiers (e.g. Gemini free) allow only a few requests per minute — slow down or add billing.`);
+    const hint=Number.isFinite(ra)&&ra>0?` The API suggests retrying in ~${Math.min(ra,3600)}s.`:'';
+    return new Error(`${prefix} 429: rate limit / quota exceeded${d?' — '+d:''}.${hint} Free tiers (e.g. Gemini free) allow only a few requests per minute — wait a bit and retry, or add billing.`);
   }
   return new Error(`${prefix} ${r.status}${d?': '+d:''}`);
 }
@@ -2027,7 +2058,7 @@ function loadSampleProject(){
 // ══ INIT ════════════════════════════════════════════════════════════
 hydrate();
 
-tw('SprizzleIDE v2.8.6  |  LIQUID GLASS');
+tw('SprizzleIDE v2.8.8  |  LIQUID GLASS');
 tw('ALERT: This is a free-to-use project. All processing takes place in the GPU and RAM on your device. None of your data is ever stored or sent to my server. For this reason, any files that are not downloaded or pushed to github will be stored in a VERY UNSTABLE cache on your device that can potentially self-destruct after you close or refresh the page.','err');
 tw('If you would like to see more interesting projects like this in the future, please consider donating to my Venmo (@Vani-gaji) or my LTC wallet (MDqV1Dkpa6FXVb6ZHmtZVXX93fMbE7dohZ)');
 tw('Type "help" for commands list. Terminal is case sensitive','info');
