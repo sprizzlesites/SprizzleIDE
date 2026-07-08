@@ -66,7 +66,7 @@
   .tree-item{display:flex;align-items:center;gap:5px;padding:3px 38px 3px 0;cursor:pointer;color:var(--text-1);font-size:12px;border-radius:3px;user-select:none;position:relative;}
   .tree-item:hover{background:var(--bg-3);}
   .tree-item.active{background:var(--accent-dim);color:var(--text-0);}
-  .tree-item.folder{color:var(--amber);}
+  .tree-item.folder{color:var(--amber);padding-right:74px;}
   .tree-item-icon{width:16px;flex-shrink:0;text-align:center;font-size:12px;}
   .tree-item .ctx-btn{display:flex;gap:3px;position:absolute;right:4px;font-size:10px;color:var(--text-2);background:var(--bg-2);padding:0 2px;border-radius:3px;}
   .tree-item .ctx-btn span{padding:1px 3px;border-radius:3px;}
@@ -612,6 +612,7 @@
         <div class="ai-context-bar">
           <span class="ai-ctx-chip active" id="ctx-file" onclick="toggleCtx('file')">📄 File</span>
           <span class="ai-ctx-chip" id="ctx-selection" onclick="toggleCtx('selection')">✂️ Selection</span>
+          <span class="ai-ctx-chip" id="ctx-project" onclick="toggleCtx('project')" title="Give the AI your whole project file tree so it can read/search/edit any file">🗂️ Project</span>
           <span class="ai-ctx-chip" id="ctx-errors" onclick="toggleCtx('errors')">🐛 Errors</span>
         </div>
         <!-- ── Context-window token usage bar ── -->
@@ -916,7 +917,7 @@ const S = {
   gh:{ token:'', branch:'main', commitName:'', commitEmail:'', currentRepo:null, currentBranch:'main' },
   ghUser:null, ghRepos:[],
   aiConnected:false, aiHistory:[], aiBlocks:[],
-  ctx:{ file:true, selection:false, errors:false },
+  ctx:{ file:true, selection:false, errors:false, project:false },
   wordWrap:false, fontSize:13, tabSize:2,
   termHist:[], termIdx:-1,
   preset:'ollama',
@@ -947,7 +948,7 @@ function renderTree(){
   let h='';
   Object.keys(folders).sort().forEach(folder=>{
     const open=ftExpanded[folder]!==false;
-    h+=`<div class="tree-item folder" onclick="toggleFolder('${folder}')" oncontextmenu="showCtx(event,'folder','${folder}')"><span class="tree-item-icon">${open?'▼':'▶'}</span><span>📁 ${folder}</span><div class="ctx-btn"><span onclick="event.stopPropagation();newInFolder('${folder}')">+</span></div></div>`;
+    h+=`<div class="tree-item folder" onclick="toggleFolder('${folder}')" oncontextmenu="showCtx(event,'folder','${folder}')"><span class="tree-item-icon">${open?'▼':'▶'}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📁 ${folder}</span><div class="ctx-btn"><span onclick="event.stopPropagation();newInFolder('${folder}')" title="New File">+</span><span onclick="event.stopPropagation();newSubfolder('${folder}')" title="New Subfolder">📁+</span><span onclick="event.stopPropagation();delFolder('${folder}')" title="Delete Folder">✕</span></div></div>`;
     if(open)folders[folder].sort().forEach(path=>{const n=path.split('/').pop();h+=treeFileHtml(path,n,14);});
   });
   root.sort().forEach(path=>h+=treeFileHtml(path,path,0));
@@ -985,9 +986,29 @@ function closeTab(path){
 
 // ══ FILE OPS ════════════════════════════════════════════════════════════
 function newFile(){document.getElementById('newfile-name').value='';document.getElementById('newfile-modal').classList.remove('hidden');setTimeout(()=>document.getElementById('newfile-name').focus(),50);}
-async function newFolder(){const n=await askPrompt('New Folder','','Folder name');if(n)mkFile(n+'/.gitkeep','');}
+async function newFolder(){const n=await askPrompt('New Folder','','Folder name');if(n)mkFolderPlaceholder(n);}
 async function newInFolder(f){const n=await askPrompt('New File','','File name');if(n)mkFile(f+'/'+n,'');}
+async function newSubfolder(parent){const n=await askPrompt('New Subfolder','','Subfolder name');if(n)mkFolderPlaceholder(parent+'/'+n);}
 function createNewFile(){const n=document.getElementById('newfile-name').value.trim();if(!n)return;closeModal('newfile-modal');mkFile(n,tpl(n));}
+// Folders are just directory prefixes on file paths, so an empty folder needs
+// a placeholder file — created directly (not via mkFile) so it doesn't hijack
+// the editor into showing a hidden .gitkeep the user never asked to open.
+function mkFolderPlaceholder(path){const p=path.replace(/\/+$/,'')+'/.gitkeep';S.files[p]={content:'',lang:lang(p),modified:false};addGitChange(p,'A');renderTree();}
+async function delFolder(path){
+  if(!await askConfirm(`Delete folder "${path}" and everything inside it?`,'Delete Folder'))return;
+  const prefix=path+'/';
+  const affected=Object.keys(S.files).filter(f=>f.startsWith(prefix));
+  if(!affected.length){tw(`Folder "${path}" is already empty.`,'warn');return;}
+  affected.forEach(f=>{delete S.files[f];const i=S.openTabs.indexOf(f);if(i!==-1)S.openTabs.splice(i,1);addGitChange(f,'D');});
+  delete ftExpanded[path];
+  if(affected.includes(S.activeTab)){
+    S.activeTab=S.openTabs[0]||null;
+    if(S.activeTab)openTab(S.activeTab);
+    else{document.getElementById('welcome').style.display='flex';document.getElementById('editor').classList.add('hidden');}
+  }
+  renderTree();renderTabs();
+  tw(`Deleted folder "${path}" (${affected.length} file${affected.length!==1?'s':''})`,'info');
+}
 function tpl(f){const e=f.split('.').pop().toLowerCase();const t={py:`# ${f}\n\ndef main():\n    print("Hello, World!")\n\nif __name__ == "__main__":\n    main()\n`,js:`// ${f}\n\nfunction main() {\n  console.log("Hello, World!");\n}\n\nmain();\n`,ts:`// ${f}\n\nfunction main(): void {\n  console.log("Hello, World!");\n}\n\nmain();\n`,html:`<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My App</title>\n  <style>\n    body { font-family: sans-serif; margin: 2rem; background: #f5f7fa; }\n    h1 { color: #6c7fff; }\n  </style>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n  <p>Edit this file and click <strong>Preview</strong> to see your app live!</p>\n  <script>\n    console.log('App loaded!');\n  <\/script>\n</body>\n</html>\n`,css:`/* ${f} */\n\n:root {\n  --primary: #6c7fff;\n}\n\nbody {\n  margin: 0;\n  font-family: sans-serif;\n}\n`,json:`{\n  "name": "project",\n  "version": "1.0.0"\n}\n`,md:`# ${f.replace('.md','')}\n\n## Overview\n\n...\n`,rs:`fn main() {\n    println!("Hello, World!");\n}\n`,go:`package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("Hello, World!")\n}\n`};return t[e]||'';}
 function mkFile(path,content){S.files[path]={content:content||'',lang:lang(path),modified:false};addGitChange(path,'A');renderTree();openTab(path);}
 async function delFile(path){if(!await askConfirm(`Delete "${path}"?`,'Delete'))return;delete S.files[path];const i=S.openTabs.indexOf(path);if(i!==-1)S.openTabs.splice(i,1);if(S.activeTab===path){S.activeTab=S.openTabs[0]||null;if(S.activeTab)openTab(S.activeTab);else{document.getElementById('welcome').style.display='flex';document.getElementById('editor').classList.add('hidden');}}addGitChange(path,'D');renderTree();renderTabs();}
@@ -1378,6 +1399,15 @@ function stripThink(t){
 // inlining big files we give the model line-oriented commands (@@READ,
 // @@REPLACE, ...) and run a bounded request→result loop in sendAIMessage.
 const AI_TOOL_MAX_STEPS=6;
+// Metered cloud APIs (OpenAI/Gemini-compat/Anthropic) bill and rate-limit per
+// request; the agentic loop can fire several requests per message, so on those
+// backends we take fewer tool steps and space the calls out. Local/in-browser
+// backends (webllm/ollama/lmstudio) are free & unlimited — no throttle.
+function isMeteredBackend(){return S.ai.backend==='openai'||S.ai.backend==='anthropic';}
+function aiMaxToolSteps(){return isMeteredBackend()?4:AI_TOOL_MAX_STEPS;}
+function aiSleep(ms){return new Promise(r=>setTimeout(r,ms));}
+let aiBusy=false;        // re-entrancy guard: only one generation loop at a time
+let aiCooldownUntil=0;   // set from a 429 Retry-After — block sends until then
 // A single @@READ chunk (and the tool note) must stay well under the context
 // window or a chunk + prompt overflows it — scale both to the live budget.
 function aiReadMaxLines(){return Math.max(30,Math.min(120,Math.floor(effectiveCtxWindow()/48)));}
@@ -1546,7 +1576,19 @@ function insertAtCursor(snippet){if(!S.activeTab){tw('AI tried to insert code bu
 function replaceSelectionOrFile(snippet){if(!S.activeTab){tw('AI tried to replace code but no file is open.','warn');return;}const start=editor.selectionStart,end=editor.selectionEnd;if(start===end){editor.value=snippet;editor.selectionStart=0;editor.selectionEnd=snippet.length;}else{editor.value=editor.value.substring(0,start)+snippet+editor.value.substring(end);editor.selectionStart=start;editor.selectionEnd=start+snippet.length;}S.files[S.activeTab].content=editor.value;S.files[S.activeTab].modified=true;renderTabs();renderTree();}
 
 // ══ AI ════════════════════════════════════════════════════════════════
-function toggleCtx(k){S.ctx[k]=!S.ctx[k];document.getElementById('ctx-'+k).classList.toggle('active');}
+function toggleCtx(k){S.ctx[k]=!S.ctx[k];document.getElementById('ctx-'+k).classList.toggle('active');updateCtxTokenBar();}
+// Compact map of the whole project (path + line count), capped to a slice of
+// the window. Gives the model the lay of the land so it can @@READ/@@SEARCH/
+// @@EDIT any file — not just the open one — for project-wide requests.
+function projectTreeText(budgetTok){
+  const paths=Object.keys(S.files).sort();
+  if(!paths.length)return '';
+  const rows=paths.map(p=>`${p} (${(S.files[p].content.match(/\n/g)||[]).length+1} ln)`);
+  let body='',shown=0;
+  for(const r of rows){if(estimateTokens(body+'\n'+r)>budgetTok)break;body+=(body?'\n':'')+r;shown++;}
+  const more=rows.length-shown;
+  return `\n\nPROJECT FILES (${paths.length}) — read any with @@READ, find text with @@SEARCH, edit with @@EDIT:\n${body}${more>0?`\n…and ${more} more (use @@LIST)`:''}`;
+}
 // Build the system prompt, sized to the live context window. Tools are added
 // only when the message needs them (or we're mid tool-loop), and the open
 // file is inlined only if it fits in a small slice of the budget — otherwise
@@ -1555,8 +1597,11 @@ function toggleCtx(k){S.ctx[k]=!S.ctx[k];document.getElementById('ctx-'+k).class
 function buildSys(latestMsg,forceTools){
   const win=effectiveCtxWindow();
   const base=S.ai.systemPrompt||'';
-  const withTools=forceTools||aiMsgNeedsTools(latestMsg);
+  // Enabling Project context implies whole-project work, so it forces tools on
+  // even for a message the intent heuristic would otherwise treat as chatter.
+  const withTools=forceTools||S.ctx.project||aiMsgNeedsTools(latestMsg);
   let s=base+(withTools?buildToolsSystemNote():'');
+  if(withTools&&S.ctx.project)s+=projectTreeText(Math.floor(win*0.2));
   if(withTools&&S.ctx.file&&S.activeTab){
     const c=S.files[S.activeTab]?.content||'';
     const lines=c.split('\n');
@@ -1581,6 +1626,13 @@ function buildSys(latestMsg,forceTools){
 async function sendAIMessage(){
   const inp=document.getElementById('ai-input');const msg=inp.value.trim();if(!msg)return;
   if(!S.aiConnected){aiMsg('system','⚠️ No AI model connected. Go to AI → Configure AI Model.');return;}
+  // Re-entrancy guard: one generation at a time. The send button is disabled
+  // mid-run, but the textarea's Enter key isn't — without this, pressing Enter
+  // during a tool loop starts a second concurrent loop that shares S.aiHistory
+  // (corrupting it) and doubles the request rate. Leave the user's text intact.
+  if(aiBusy){aiMsg('system','⏳ Still working on the previous message — please wait for it to finish.');return;}
+  if(Date.now()<aiCooldownUntil){aiMsg('system',`⏳ Rate-limited — please wait ${Math.ceil((aiCooldownUntil-Date.now())/1000)}s before sending again.`);return;}
+  aiBusy=true;
   const sel=S.ctx.selection?getsel():null;
   let uc=msg;if(sel)uc+=`\n\nSelected code:\n\`\`\`\n${sel}\n\`\`\``;
   aiMsg('user',msg);inp.value='';inp.style.height='auto';
@@ -1591,8 +1643,11 @@ async function sendAIMessage(){
     // Agentic loop: the model may issue @@ tool commands to read / search /
     // edit project files chunk by chunk. Each result is fed back to it until
     // it produces a final answer (or the step budget runs out).
-    let r='',steps=0,bounces=0,lastReply=null;
+    let r='',steps=0,bounces=0,lastReply=null;const maxSteps=aiMaxToolSteps();
     while(true){
+      // Space out requests to metered APIs so a multi-step loop doesn't burst
+      // past a free tier's per-minute limit.
+      if(steps>0&&isMeteredBackend())await aiSleep(1100);
       r=stripThink(await callAI(S.aiHistory,buildSys(msg,steps>0)));
       const tool=parseAIToolCall(r);
       // Tiny models sometimes parrot the file-block format with placeholder
@@ -1606,7 +1661,7 @@ async function sendAIMessage(){
       if(r===lastReply){aiMsg('system','⚠️ Model is repeating itself — stopping here.');break;}
       lastReply=r;
       if((junkEmpty||echoed)&&bounces>=2){aiMsg('system','⚠️ The model keeps echoing its instructions instead of acting — it is likely too small for this task. Try a larger model (tap the model badge).');break;}
-      if(steps>=AI_TOOL_MAX_STEPS){aiMsg('system','⚠️ Tool step limit reached — answering with what was gathered so far.');break;}
+      if(steps>=maxSteps){aiMsg('system','⚠️ Tool step limit reached — answering with what was gathered so far.');break;}
       steps++;if(junkEmpty||echoed)bounces++;
       S.aiHistory.push({role:'assistant',content:r});
       const res=tool?execAITool(tool)
@@ -1632,8 +1687,11 @@ async function sendAIMessage(){
     if(applied)tw(`✓ AI applied ${applied} change(s) to your project`,'info');
   }
   catch(e){th.remove();aiMsg('system','❌ '+e.message);}
-  document.getElementById('ai-send').disabled=false;
-  updateCtxTokenBar(); // refresh after assistant reply arrives
+  finally{
+    aiBusy=false;
+    document.getElementById('ai-send').disabled=false;
+    updateCtxTokenBar(); // refresh after assistant reply arrives
+  }
 }
 
 // ── callAI: applies sliding context window before every backend call ──
@@ -1644,8 +1702,18 @@ async function sendAIMessage(){
 // newline in a header value makes fetch() throw before any request is sent.
 function cleanBaseUrl(u){u=(u||'').trim().replace(/\/+$/,'');u=u.replace(/\/(chat\/completions|api\/chat)$/i,'');return u.replace(/\/+$/,'');}
 function cleanKey(k){return (k||'').replace(/\s+/g,'');}
-// Surface the API's own explanation instead of a bare status code.
-async function apiError(prefix,r){let d='';try{const j=await r.json();d=j.error?.message||j.message||(typeof j.error==='string'?j.error:'');}catch(e){}return new Error(`${prefix} ${r.status}${d?': '+d:''}`);}
+// Surface the API's own explanation instead of a bare status code, and treat
+// 429 specially: honour Retry-After and set a cooldown so we stop hammering.
+async function apiError(prefix,r){
+  let d='';try{const j=await r.json();d=j.error?.message||j.message||(typeof j.error==='string'?j.error:'');}catch(e){}
+  if(r.status===429){
+    const ra=parseInt((r.headers&&r.headers.get&&r.headers.get('retry-after'))||'',10);
+    const waitS=Number.isFinite(ra)&&ra>0?Math.min(ra,120):30;
+    aiCooldownUntil=Date.now()+waitS*1000;
+    return new Error(`${prefix} 429: rate limit / quota exceeded${d?' — '+d:''}. Pausing ${waitS}s before you can send again. Free tiers (e.g. Gemini free) allow only a few requests per minute — slow down or add billing.`);
+  }
+  return new Error(`${prefix} ${r.status}${d?': '+d:''}`);
+}
 
 async function callAI(messages,sys){
   const msgs = applyContextWindow(messages, sys); // ← sliding window trim
@@ -1799,7 +1867,7 @@ let _hydrating=false;
 function persist(){if(_hydrating)return;try{localStorage.setItem('nide_ai',JSON.stringify(S.ai));localStorage.setItem('nide_gh',JSON.stringify({token:S.gh.token,branch:S.gh.branch,commitName:S.gh.commitName,commitEmail:S.gh.commitEmail,currentRepo:S.gh.currentRepo,currentBranch:S.gh.currentBranch}));}catch(e){}try{localStorage.setItem('nide_files',JSON.stringify(S.files));}catch(e){tw('Workspace too large to auto-save files.','warn');}try{localStorage.setItem('nide_editor',JSON.stringify({openTabs:S.openTabs,activeTab:S.activeTab,ftExpanded:ftExpanded}));}catch(e){}try{const ff=document.getElementById('set-fontfamily');localStorage.setItem('nide_settings',JSON.stringify({fontSize:S.fontSize,tabSize:S.tabSize,wordWrap:S.wordWrap,fontFamily:ff?ff.value:null,accent:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||null,ts:Date.now()}));}catch(e){}}
 function hydrate(){const TTL=30*24*60*60*1000;_hydrating=true;try{const ai=localStorage.getItem('nide_ai');if(ai){const saved=JSON.parse(ai);Object.assign(S.ai,saved);if(!S.ai.contextWindow)S.ai.contextWindow=4096;}const gh=localStorage.getItem('nide_gh');if(gh)Object.assign(S.gh,JSON.parse(gh));}catch(e){}try{const st=localStorage.getItem('nide_settings');if(st){const s=JSON.parse(st);if(Date.now()-s.ts>TTL){['nide_ai','nide_gh','nide_files','nide_editor','nide_settings'].forEach(k=>localStorage.removeItem(k));_hydrating=false;return;}S.fontSize=s.fontSize||13;S.tabSize=s.tabSize||2;S.wordWrap=!!s.wordWrap;const ff=document.getElementById('set-fontfamily');const fs=document.getElementById('set-fontsize');const ts=document.getElementById('set-tabsize');const ww=document.getElementById('set-wordwrap');if(ff&&s.fontFamily)ff.value=s.fontFamily;if(fs)fs.value=S.fontSize;if(ts)ts.value=S.tabSize;if(ww)ww.value=S.wordWrap?'pre-wrap':'pre';applySettings();if(s.accent)setAccentColor(s.accent);}}catch(e){}try{const fi=localStorage.getItem('nide_files');if(fi){const saved=JSON.parse(fi);Object.assign(S.files,saved);renderTree();}}catch(e){}try{const ed=localStorage.getItem('nide_editor');if(ed){const s=JSON.parse(ed);if(s.ftExpanded)Object.assign(ftExpanded,s.ftExpanded);if(Array.isArray(s.openTabs))S.openTabs=s.openTabs;if(s.activeTab&&S.files[s.activeTab])openTab(s.activeTab);}}catch(e){}finally{_hydrating=false;}}
 async function clearWorkspaceCache(){if(!await askConfirm('Clear workspace? Your current project files will be removed from the cache and the editor will reset to a blank state. Your IDE settings, AI configuration, and GitHub connection will not be affected.','Clear Workspace'))return;['nide_files','nide_editor'].forEach(k=>localStorage.removeItem(k));S.files={};S.openTabs=[];S.activeTab=null;ftExpanded={};document.getElementById('welcome').style.display='flex';document.getElementById('editor').classList.add('hidden');renderTree();renderTabs();renderLineNumbers();tw('Workspace cleared.','info');}
-async function restoreSystemDefaults(){if(!await askConfirm('Restore system defaults? All settings and API tokens will be reset to factory defaults, and your current project will be deleted from the saved workspace cache. This cannot be undone.','Restore Defaults'))return;['nide_ai','nide_gh','nide_files','nide_editor','nide_settings'].forEach(k=>localStorage.removeItem(k));S.files={};S.openTabs=[];S.activeTab=null;S.aiConnected=false;S.aiHistory=[];S.aiBlocks=[];S.preset='ollama';Object.assign(S.ai,{backend:'webllm',webllmModel:'Qwen3-0.6B-q4f16_1-MLC',ollamaUrl:'http://localhost:11434',ollamaModel:'qwen2.5-coder:7b',lmstudioUrl:'http://localhost:1234/v1',lmstudioModel:'',openaiUrl:'https://api.openai.com/v1',openaiKey:'',openaiModel:'gpt-4o',anthropicKey:'',anthropicModel:'claude-sonnet-5',systemPrompt:AI_DEFAULT_SYSPROMPT,maxTokens:4096,temperature:0.7,contextWindow:4096,autoResetCtx:true});Object.assign(S.gh,{token:'',branch:'main',commitName:'',commitEmail:'',currentRepo:null,currentBranch:'main'});S.ghUser=null;S.ghRepos=[];S.fontSize=13;S.tabSize=2;S.wordWrap=false;Object.assign(S.ctx,{file:true,selection:false,errors:false});ftExpanded={};const ff=document.getElementById('set-fontfamily');const fs=document.getElementById('set-fontsize');const ts=document.getElementById('set-tabsize');const ww=document.getElementById('set-wordwrap');if(ff)ff.value="'Cascadia Code','Consolas',monospace";if(fs)fs.value=13;if(ts)ts.value=2;if(ww)ww.value='pre';applySettings();setAccentColor('#6c7fff');document.getElementById('welcome').style.display='flex';document.getElementById('editor').classList.add('hidden');renderTree();renderTabs();renderLineNumbers();document.getElementById('ai-status-dot').style.background='var(--red)';document.getElementById('ai-status-text').textContent='AI: Off';document.getElementById('ai-model-badge').textContent='No model';document.getElementById('header-model-name').textContent='No Model';document.getElementById('ai-messages').innerHTML='';document.getElementById('gh-not-connected').classList.remove('hidden');document.getElementById('gh-connected').classList.add('hidden');document.getElementById('gh-status-text').textContent='GitHub: Not connected';document.getElementById('sidebar-project-name').textContent='EXPLORER';document.getElementById('git-branch').textContent='main';document.getElementById('indent-type').textContent='Spaces: 2';const ctxFile=document.getElementById('ctx-file');const ctxSel=document.getElementById('ctx-selection');const ctxErr=document.getElementById('ctx-errors');if(ctxFile)ctxFile.classList.add('active');if(ctxSel)ctxSel.classList.remove('active');if(ctxErr)ctxErr.classList.remove('active');tw('System defaults restored.','info');}
+async function restoreSystemDefaults(){if(!await askConfirm('Restore system defaults? All settings and API tokens will be reset to factory defaults, and your current project will be deleted from the saved workspace cache. This cannot be undone.','Restore Defaults'))return;['nide_ai','nide_gh','nide_files','nide_editor','nide_settings'].forEach(k=>localStorage.removeItem(k));S.files={};S.openTabs=[];S.activeTab=null;S.aiConnected=false;S.aiHistory=[];S.aiBlocks=[];S.preset='ollama';Object.assign(S.ai,{backend:'webllm',webllmModel:'Qwen3-0.6B-q4f16_1-MLC',ollamaUrl:'http://localhost:11434',ollamaModel:'qwen2.5-coder:7b',lmstudioUrl:'http://localhost:1234/v1',lmstudioModel:'',openaiUrl:'https://api.openai.com/v1',openaiKey:'',openaiModel:'gpt-4o',anthropicKey:'',anthropicModel:'claude-sonnet-5',systemPrompt:AI_DEFAULT_SYSPROMPT,maxTokens:4096,temperature:0.7,contextWindow:4096,autoResetCtx:true});Object.assign(S.gh,{token:'',branch:'main',commitName:'',commitEmail:'',currentRepo:null,currentBranch:'main'});S.ghUser=null;S.ghRepos=[];S.fontSize=13;S.tabSize=2;S.wordWrap=false;Object.assign(S.ctx,{file:true,selection:false,errors:false,project:false});ftExpanded={};const ff=document.getElementById('set-fontfamily');const fs=document.getElementById('set-fontsize');const ts=document.getElementById('set-tabsize');const ww=document.getElementById('set-wordwrap');if(ff)ff.value="'Cascadia Code','Consolas',monospace";if(fs)fs.value=13;if(ts)ts.value=2;if(ww)ww.value='pre';applySettings();setAccentColor('#6c7fff');document.getElementById('welcome').style.display='flex';document.getElementById('editor').classList.add('hidden');renderTree();renderTabs();renderLineNumbers();document.getElementById('ai-status-dot').style.background='var(--red)';document.getElementById('ai-status-text').textContent='AI: Off';document.getElementById('ai-model-badge').textContent='No model';document.getElementById('header-model-name').textContent='No Model';document.getElementById('ai-messages').innerHTML='';document.getElementById('gh-not-connected').classList.remove('hidden');document.getElementById('gh-connected').classList.add('hidden');document.getElementById('gh-status-text').textContent='GitHub: Not connected';document.getElementById('sidebar-project-name').textContent='EXPLORER';document.getElementById('git-branch').textContent='main';document.getElementById('indent-type').textContent='Spaces: 2';const ctxFile=document.getElementById('ctx-file');const ctxSel=document.getElementById('ctx-selection');const ctxErr=document.getElementById('ctx-errors');const ctxProj=document.getElementById('ctx-project');if(ctxFile)ctxFile.classList.add('active');if(ctxSel)ctxSel.classList.remove('active');if(ctxErr)ctxErr.classList.remove('active');if(ctxProj)ctxProj.classList.remove('active');tw('System defaults restored.','info');}
 
 // ══ MODALS / PANELS / ACTIVITY ════════════════════════════════════════
 
@@ -1913,7 +1981,8 @@ function showCtx(e,type,path){
     {l:'🐙 Push to GitHub',a:()=>ghPushChanges()},
   ]:[
     {l:'+ New File Here',a:()=>newInFolder(path)},
-    {l:'🗑 Delete Folder',a:async()=>{if(await askConfirm(`Delete "${path}"?`,'Delete')){Object.keys(S.files).filter(f=>f.startsWith(path+'/')).forEach(f=>delete S.files[f]);renderTree();}}},
+    {l:'📁 New Subfolder Here',a:()=>newSubfolder(path)},
+    {sep:true},{l:'🗑 Delete Folder',a:()=>delFolder(path)},
   ];
   menu.innerHTML=items.map(i=>i.sep?'<div class="ctx-menu-sep"></div>':`<div class="ctx-menu-item">${i.l}</div>`).join('');
   menu.querySelectorAll('.ctx-menu-item').forEach((el,idx)=>{const item=items.filter(i=>!i.sep)[idx];if(item)el.onclick=()=>{item.a();hideCtx();};});
@@ -1958,7 +2027,7 @@ function loadSampleProject(){
 // ══ INIT ════════════════════════════════════════════════════════════
 hydrate();
 
-tw('SprizzleIDE v2.8.3  |  LIQUID GLASS');
+tw('SprizzleIDE v2.8.6  |  LIQUID GLASS');
 tw('ALERT: This is a free-to-use project. All processing takes place in the GPU and RAM on your device. None of your data is ever stored or sent to my server. For this reason, any files that are not downloaded or pushed to github will be stored in a VERY UNSTABLE cache on your device that can potentially self-destruct after you close or refresh the page.','err');
 tw('If you would like to see more interesting projects like this in the future, please consider donating to my Venmo (@Vani-gaji) or my LTC wallet (MDqV1Dkpa6FXVb6ZHmtZVXX93fMbE7dohZ)');
 tw('Type "help" for commands list. Terminal is case sensitive','info');
